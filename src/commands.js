@@ -3,7 +3,11 @@ import * as a from './actions.js';
 // Slash commands. `args` in square brackets are optional, so picking the command runs it straight away.
 // `complete` names the list offered while typing the first argument.
 export const COMMANDS = [
-  { name: 'show', args: '<item>', desc: 'Show an item', complete: 'items', run: (ctx, s) => a.showItem(ctx, s) },
+  { name: 'send', args: '[request]', desc: 'Send a request (the one picked in Requests if none is named)', complete: 'requests', run: (ctx, s) => a.send(ctx, s) },
+  { name: 'env', args: '[name]', desc: 'The environment the variables come from (a list to pick from if none is named)', complete: 'environments', run: (ctx, s) => a.chooseEnvironment(ctx, s) },
+  { name: 'curl', args: '[request]', desc: 'Copy a request, filled in, as a curl command', complete: 'requests', run: (ctx, s) => a.copyCurl(ctx, s) },
+  { name: 'open', args: '<file.http>', desc: 'Open another .http file', complete: 'files', run: (ctx, s) => a.open(ctx, s) },
+  { name: 'new', args: '[file.http]', desc: 'Write an example .http file to start from (requests.http) and open it', run: (ctx, s) => a.newFile(ctx, s) },
   { name: 'run', args: '<command>', desc: 'Run a shell command (as ! does)', run: (ctx, s) => a.raw(ctx, s) },
   { name: 'last', desc: 'All the output of the last command', run: (ctx) => ctx.showLast() },
   { name: 'settings', desc: 'Accent colour, mouse, updates, history', run: (ctx) => a.settings(ctx) },
@@ -22,8 +26,10 @@ export function findCommand(name) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function completions(kind, data) {
-  if (kind === 'items') return (data?.items ?? []).map((it) => it.name);
+function completions(kind, data, files) {
+  if (kind === 'requests') return (data?.requests ?? []).map((r) => r.name ?? r.label);
+  if (kind === 'environments') return data?.environments.names ?? [];
+  if (kind === 'files') return files;
   return [];
 }
 
@@ -39,7 +45,7 @@ function ranked(names, query) {
  * list a command completes its argument from. `insert` replaces the prompt text; `run` means picking
  * it can run straight away.
  */
-export function suggestionsFor(value, { data } = {}) {
+export function suggestionsFor(value, { data, files = [] } = {}) {
   if (!value.startsWith('/')) return [];
   const space = value.indexOf(' ');
   if (space < 0) {
@@ -53,7 +59,7 @@ export function suggestionsFor(value, { data } = {}) {
   const cmd = findCommand(value.slice(1, space));
   const rest = value.slice(space + 1);
   if (!cmd?.complete) return [];
-  const names = ranked(completions(cmd.complete, data), rest);
+  const names = ranked(completions(cmd.complete, data, files), rest);
   if (names.length === 1 && names[0] === rest) return [];
   return names.slice(0, 7).map((n) => ({ label: n, insert: `/${cmd.name} ${n}`, run: true }));
 }

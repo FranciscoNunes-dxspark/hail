@@ -1,43 +1,43 @@
-// Pip, Hail's seabird. One pixel drawing feeds the terminal pet, the SVG logo and the app
-// icon. This is slipway's placeholder creature: redraw BASE and MOODS as the real mascot, keep the
-// palette letters, and run `node scripts/logo.js` to make assets/ from it.
+// Pip, Hail's seabird. One pixel drawing feeds the terminal pet, the SVG logo and the app icon. A
+// puffin, in profile: seabirds carry things back and forth over open water, and so does Hail.
 
 /** Who the pet is; the welcome box, the mood lines and the logo's title all say it from here. */
-export const PET = { name: 'Pip', kind: 'seabird' };
+export const PET = { name: 'Pip', kind: 'puffin' };
 
 // The accent's family, as Trawl's Glim, Splice's Twig and Keel's Pinch are coloured from theirs: the
-// accent for the outline, a darker and a paler shade, a near-black with its tint, and one contrasting colour.
+// accent for the outline, a darker shade for the back, a pale face, a near-black eye, and one contrasting colour.
 export const PALETTE = {
   G: '#ff875f', // outline, the accent
-  D: '#8c4a34', // body
-  L: '#ffcfbf', // belly
-  E: '#1f100b', // eyes
+  D: '#8c4a34', // back and wing
+  L: '#ffcfbf', // face and breast
+  E: '#1e100b', // eye
   W: '#ffffff', // eye shine
-  T: '#ffb35f', // cheeks, the one warm colour
+  T: '#ffd75f', // the beak, the one bright colour
 };
 
-// 16 × 10 pixels; '.' is transparent. The body is columns 0–13; 14–15 are room for a waving fin.
+// 16 × 10 pixels; '.' is transparent. Facing right, with the beak in columns 11–15.
 const BASE = [
-  '....GGGGGG......',
-  '..GGDDDDDDGG....',
-  '.GDDDDDDDDDDG...',
-  'GDDEWDDDDEWDDG..',
-  'GDDEEDDDDEEDDG..',
-  'GDTDDDLLDDDTDG..',
-  'GDDDDLLLLDDDDG..',
-  '.GDDDDLLDDDDG...',
-  '..GGDDDDDDGG....',
+  '....GGGGG.......',
+  '..GGDDDDDGG.....',
+  '.GDDDDDDDDDG....',
+  '.GDLLLLEWDDGTT..',
+  'GDLLLLLEEDDTTTT.',
+  'GDLLLLLLLDDGTT..',
+  'GDLLLLLLLLDDG...',
+  '.GDLLLLLLLDDG...',
+  '..GGDLLLLDGG....',
   '....GGGGGG......',
 ];
 
 // Each mood replaces some rows of the base drawing.
 const MOODS = {
   idle: {},
-  look: { 3: 'GDDWEDDDDWEDDG..' }, // glancing the other way, for the busy animation
-  sleep: { 3: 'GDDDDDDDDDDDDG..', 4: 'GDDEEDDDDEEDDG..' },
-  happy: { 3: 'GDDEDDDDDDEDDG..', 4: 'GDEDEDDDDEDEDG..' },
-  worried: { 3: 'GDDWWDDDDWWDDG..', 4: 'GDDEEDDDDEEDDG..' },
-  wave: { 2: '.GDDDDDDDDDDG.GG', 3: 'GDDEWDDDDEWDDGDG', 4: 'GDDEEDDDDEEDDGG.' },
+  look: { 3: '.GDLLLLWEDDGTT..' }, // glancing the other way, for the busy animation
+  sleep: { 3: '.GDLLLLDDDDGTT..', 4: 'GDLLLLLEEDDTTTT.' },
+  happy: { 3: '.GDLLLLDEDDGTT..', 4: 'GDLLLLLEDEDTTTT.' },
+  worried: { 3: '.GDLLLLWWDDGTT..', 4: 'GDLLLLLEEDDTT...' },
+  // Calling out, beak open: a request has gone and come back.
+  wave: { 3: '.GDLLLLEWDDGTTTT', 4: 'GDLLLLLEEDDG....', 5: 'GDLLLLLLLDDGTTTT' },
 };
 
 /** The drawing for a mood, as rows of palette letters. */
@@ -68,14 +68,14 @@ export function petRows(mood = 'idle') {
   return rows;
 }
 
-/** A one-line face for the header. */
+/** A one-line face for the header: ▸ is the beak. */
 export const FACES = {
-  idle: '(•ᴗ•)',
-  look: '(•ᴗ•)',
-  sleep: '(–ᴗ–)',
-  happy: '(^ᴗ^)',
-  worried: '(◉ᴗ◉)',
-  wave: '(•ᴗ•)/',
+  idle: '(•▸)',
+  look: '(•▸)',
+  sleep: '(–▸)',
+  happy: '(^▸)',
+  worried: '(◉▸)',
+  wave: '(•▸)~',
 };
 
 /** How the pet feels right now: about the last result, and whether something is running. */
@@ -89,8 +89,8 @@ export function moodFor({ data, busy, lastEntry, now = Date.now() }) {
 
 /** A sentence for the welcome box. */
 export function moodLine(mood, data) {
-  if (!data) return `${PET.name} is getting things ready.`;
+  if (!data) return `Open a .http file and ${PET.name} will carry its requests.`;
   if (mood === 'worried') return 'Something went wrong: the line below says what.';
-  const n = data.items.length;
-  return `${n} item${n === 1 ? '' : 's'} to look at.`;
+  const n = data.requests.length;
+  return `${n} request${n === 1 ? '' : 's'} in ${data.name}, ready to send.`;
 }

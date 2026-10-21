@@ -1,14 +1,14 @@
-<p align="center"><img src="assets/logo.svg" width="120" alt="Pip, the Hail seabird"></p>
+<p align="center"><img src="assets/logo.svg" width="120" alt="Pip, the Hail puffin"></p>
 
 # Hail
 
-An HTTP client for the terminal, over .http files.
+An HTTP client for the terminal, over `.http` files: the format VS Code's REST Client and JetBrains'
+HTTP Client already read, so the requests live in the repository next to the code and work in all
+three. Open a file, pick a request, press `↵`.
 
-A keyboard-driven terminal app, a sibling of Splice and Trawl: the same prompt, help window, mouse,
+A sibling of [Splice](https://github.com/FranciscoNunes-dxspark/splice) and
+[Trawl](https://github.com/FranciscoNunes-dxspark/trawl): the same prompt, help window, mouse,
 settings and self-updating builds.
-
-> Started from [slipway](https://github.com/FranciscoNunes-dxspark/slipway). The Items view and its data
-> (`src/source.js`) are placeholders, there to be replaced by what Hail is really for.
 
 ## Install
 
@@ -20,31 +20,90 @@ From a checkout (Node 22 or later):
 
 ```bash
 npm install
-npm start
+npm start -- api.http
 ```
+
+## Use
+
+```bash
+hail api.http     # that file
+hail              # the first .http (or .rest) file in this folder or the two below it
+```
+
+With none, `/new` writes an example to start from.
+
+```http
+@host = https://api.example.com
+
+### Log in
+# @name login
+POST {{host}}/login
+Content-Type: application/json
+
+{ "user": "ana", "password": "{{password}}" }
+
+### Who am I
+GET {{host}}/me
+Authorization: Bearer {{login.response.body.token}}
+```
+
+`###` starts a request, and the rest of its line names it. Under it: the method and URL (a plain URL is
+a GET), the headers, a blank line, and the body. A body can come from a file: `< ./body.json` as it is,
+`<@ ./body.json` with its variables filled in. Query lines under the URL (`?page=2`, `&size=10`) are
+joined onto it. JetBrains' response handlers (`> {% ... %}`) are skipped.
+
+Hail reads the file again whenever it's saved, so it can sit beside your editor.
+
+### Variables
+
+`{{name}}` in the URL, the headers or the body. Values come from, first to last:
+
+| Where | |
+| --- | --- |
+| The environment | `http-client.env.json` beside the file: `{ "dev": { "host": "http://localhost:3000" }, "prod": { ... } }`, with `"$shared"` going into every one. `http-client.private.env.json` beside it goes over it, for secrets kept out of git. `e` picks the environment; Hail starts on one called dev or local and remembers the choice for each file |
+| The file | `@name = value` lines |
+| Earlier responses | `{{login.response.body.token}}` is the `token` field of what the request named `login` (`# @name login`) got back; a path like `data.items[0].id` (or `$.data…`) reaches further in, `.headers.X-Request-Id` reads a header |
+| Built-ins | `{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt 1 100}}`, `{{$processEnv NAME}}` or `{{$env.NAME}}` (this computer's environment), `{{$azToken [resource]}}` (a token from the Azure CLI's sign-in, Azure Resource Manager's unless a resource is named) |
+
+The environment wins over the file, so a file can hold defaults that environments override. A
+variable can be made of others. A request with a variable nothing gives a value isn't sent: Hail
+says which.
 
 ## Keys
 
 | Key | What it does |
 | --- | --- |
-| `1` `2` / `tab` | Items, Log (`shift+tab` goes back) |
+| `1` `2` `3` / `tab` | Requests, Response, Log (`shift+tab` goes back) |
+| `↵` | Send the request under the cursor; in Response, send it again |
+| `c` | Copy the request as a curl command, variables filled in |
+| `y` | Copy the request's URL; in Response, the body |
+| `v` | The response, the whole width |
+| `h` | In Response: show or hide the headers |
+| `e` | Pick the environment |
+| `r` | Read the file again |
 | `/` or `:` | The command prompt, with completion |
 | `!` | Run a shell command, e.g. `!node --version` |
-| `r` | Refresh |
-| `esc` | Cancel the running command, or clear the activity lines |
+| `esc` | Cancel the request on its way, or clear the activity lines |
 | `,` | Settings |
 | `?` | Every key and command |
 | `q` / `ctrl+c` | Quit |
 
-In lists: `j` `k` or the arrows move, `g` `G` go to the top and bottom, `ctrl+d` `ctrl+u` page, `y`
-copies, `↵` opens. The mouse works too: click a tab, a row or the prompt, double-click for `↵`, scroll
-with the wheel, and drag to select text, which is copied when you let go.
+In lists: `j` `k` or the arrows move, `g` `G` go to the top and bottom, `ctrl+d` `ctrl+u` page. The
+mouse works too: click a tab, a row or the prompt, double-click for `↵`, scroll with the wheel, and
+drag to select text, which is copied when you let go.
+
+Beside the list is the request under the cursor as written, or, once it's been sent, its response:
+the status, how long it took, its size, and the body, JSON indented.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `/show <item>` | Show an item |
+| `/send [request]` | Send a request by name (the one under the cursor if none is named) |
+| `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
+| `/curl [request]` | Copy a request, filled in, as a curl command |
+| `/open <file.http>` | Open another file |
+| `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
 | `/settings` | Accent colour, mouse, updates, history |
@@ -55,11 +114,12 @@ with the wheel, and drag to select text, which is copied when you let go.
 
 ## Settings
 
-`,` or `/settings`. They're kept in `~/.hail/config.json` (`HAIL_HOME` moves it).
+`,` or `/settings`. They're kept in `~/.hail/config.json` (`HAIL_HOME` moves it), with the environment
+picked for each file and the files opened lately.
 
 | Setting | |
 | --- | --- |
-| Accent colour | The colour of the cursor, borders and the pet |
+| Accent colour | The colour of the cursor, borders and Pip |
 | Mouse | Off leaves selecting text to the terminal |
 | Check for new versions | Once a day, in the downloaded builds |
 | Install them by itself | Off only says a new version is out |

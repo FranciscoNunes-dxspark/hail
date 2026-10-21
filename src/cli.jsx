@@ -1,9 +1,11 @@
 import React from 'react';
 import { render } from 'ink';
+import { resolve } from 'node:path';
 import { COMPILED, VERSION } from './version.js';
 import { loadConfig } from './config.js';
 import { setAccent } from './theme.js';
 import { App } from './ui/App.jsx';
+import { findHttpFiles } from './files.js';
 import { checkForUpdate, installUpdate, removeOldExecutables } from './update.js';
 import { copyToClipboard } from './clipboard.js';
 import { terminalMouse } from './mouse.js';
@@ -16,11 +18,13 @@ if (args.includes('-v') || args.includes('--version')) {
 }
 
 if (args.includes('-h') || args.includes('--help')) {
-  console.log(`hail
+  console.log(`hail [file.http]
 
-An HTTP client for the terminal, over .http files.
+An HTTP client for the terminal, over .http files. Opens [file.http], or the
+first .http file in the current folder (or the folders under it).
 
-Inside: press ? for shortcuts, / for commands, ! to run a shell command.`);
+Inside: ↵ sends the request under the cursor, e picks the environment,
+? shows every key, / the commands.`);
   process.exit(0);
 }
 
@@ -49,8 +53,10 @@ if (COMPILED) removeOldExecutables();
 const mouse = await terminalMouse(process.stdin, process.stdout);
 // y copies: to the system clipboard, or through the terminal (OSC 52) over SSH or when that fails.
 const copy = (text) => copyToClipboard(text);
+const given = args.find((x) => !x.startsWith('-'));
+const file = given ? resolve(given) : findHttpFiles(process.cwd()).map((f) => resolve(f))[0];
 const app = render(
-  <App config={config} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} />,
+  <App config={config} initialFile={file} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} />,
   // Through the mouse's stdout, which watches the frames to select text from.
   { exitOnCtrlC: false, stdout: mouse?.stdout ?? process.stdout },
 );

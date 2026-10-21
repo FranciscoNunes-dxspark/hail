@@ -13,19 +13,21 @@ import { assetName, compareVersions, parseChecksums } from '../src/update.js';
 import { run } from '../src/run.js';
 
 test('commands: exact names, unambiguous prefixes, and completion of their argument', () => {
-  assert.equal(findCommand('show').name, 'show');
-  assert.equal(findCommand('sh').name, 'show');
-  assert.equal(findCommand('s'), null, 'show and settings both start with s');
-  assert.deepEqual(suggestionsFor('/se', {}).map((s) => s.label), ['/settings']);
-  const data = { items: [{ name: 'bowline' }, { name: 'reef knot' }] };
-  assert.deepEqual(suggestionsFor('/show re', { data }).map((s) => s.insert), ['/show reef knot']);
+  assert.equal(findCommand('send').name, 'send');
+  assert.equal(findCommand('cu').name, 'curl');
+  assert.equal(findCommand('se'), null, 'send and settings both start with se');
+  assert.deepEqual(suggestionsFor('/sett', {}).map((s) => s.label), ['/settings']);
+  const data = { requests: [{ name: 'login', label: 'login' }, { name: null, label: 'GET https://x/users' }], environments: { names: ['dev', 'prod'] } };
+  assert.deepEqual(suggestionsFor('/send lo', { data }).map((s) => s.insert), ['/send login']);
+  assert.deepEqual(suggestionsFor('/env p', { data }).map((s) => s.insert), ['/env prod']);
+  assert.deepEqual(suggestionsFor('/open a', { files: ['api.http', 'b/other.http'] }).map((s) => s.insert), ['/open api.http']);
   assert.deepEqual(suggestionsFor('plain text', { data }), []);
   for (const c of COMMANDS) assert.ok(c.desc && typeof c.run === 'function', `/${c.name} has a description and runs`);
 });
 
 test('help: every section lays out, and the commands are a section of their own', () => {
   for (const section of [...HELP, commandsSection(COMMANDS)]) assert.ok(sectionLines(section, 60).length > 0, section.title);
-  assert.ok(commandsSection(COMMANDS).rows.some((r) => String(r[0]).includes('/show')));
+  assert.ok(commandsSection(COMMANDS).rows.some((r) => String(r[0]).includes('/send')));
 });
 
 test('settings: the rows and their values', () => {

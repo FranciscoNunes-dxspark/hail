@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Hail is a keyboard-driven terminal app built with Ink (React for the terminal) on Node 22+: An HTTP client for the terminal, over .http files. It was started from slipway, and it's a sibling of Splice (a git client) and Trawl (a SQL client). Plain JavaScript ES modules with `.jsx` for components; no TypeScript, no linter config. The README is the user-facing spec; when behaviour changes, update it too.
+An HTTP client for the terminal, over .http files. Hail is a keyboard-driven terminal app built with Ink (React for the terminal) on Node 22+. It was started from slipway, and it's a sibling of Splice (a git client) and Trawl (a SQL client). Plain JavaScript ES modules with `.jsx` for components; no TypeScript, no linter config. The README is the user-facing spec; when behaviour changes, update it too.
 
 The shared kit, `scripts/shared-check.js`'s `SHARED` list (`text.js`, `ui/parts.jsx`, `ui/hooks.js`, `mouse.js`, `selection.js`, `clipboard.js`, `jsx-hooks.js`, `register.js`, `version.js`, `help-layout.js`, `ui/HelpView.jsx`, `scripts/build.js` and itself), is the same as Splice's and Trawl's apart from the apps' names. `node scripts/shared-check.js ../splice [--diff]` reports drift and exits with 1 on it. Keep them the same: a change to one goes into the siblings too, and anything only Hail needs lives in its own file.
 
@@ -26,12 +26,17 @@ Releases are automatic: every push to main (except Markdown-only ones) runs the 
 
 ## Architecture
 
-- **`src/source.js`**: where the data comes from. A placeholder list for now; replace it with the real source, keeping it async so `App` can show loading and errors. `App` takes it as the `load` prop, so tests pass their own.
+- **`src/http-file.js`**: parsing `.http` files (VS Code's REST Client and JetBrains' HTTP Client format) into `{ variables, requests }`, pure. A request's `label` (its name, else method and URL) is how responses are kept.
+- **`src/variables.js`**: filling in `{{...}}`, pure apart from the built-ins, whose clock, randomness, process environment and `$azToken` come in through `env` so tests fix them. The environment wins over the file's `@variables`; `name.response.body.path` reads earlier responses by request name.
+- **`src/environments.js`**: `http-client.env.json` and `http-client.private.env.json` beside the file, `$shared` in each.
+- **`src/send.js`**: `prepare` (variables filled in, a body file read), `send` (through `fetch`, which App doesn't stub: tests run a server on 127.0.0.1), `networkError` (fetch's "fetch failed" in words), `prettyBody`, `toCurl`.
+- **`src/files.js`**: `loadHttpFile` (what `App`'s `load` prop defaults to: the parsed file and its environments), finding `.http` files, and `/new`'s example. `App` watches the file's folder and reloads when it or an env file changes.
+- **`src/azure.js`**: `{{$azToken}}` through the Azure CLI, as Trawl and Keel get tokens; App takes it as the `azToken` prop.
 - **`src/run.js`**: the only place another program is started. Nothing it starts has a terminal, so nothing may wait on a prompt; an abort kills the whole tree (`taskkill /T` on Windows).
 - **`src/actions.js`**: every user-facing operation, written once. Keys and slash commands call these with `ctx`. Questions before anything destructive live here (`ctx.confirm({ ..., danger: true })`).
 - **`src/commands.js`**: the slash-command table (`name`, `args`, `desc`, optional `complete`, `run(ctx, rest)`) and completion. Args in `[brackets]` are optional, so picking the command runs it at once.
 - **`src/ui/App.jsx`**: layout, focus, the prompt, overlays, the activity log and **`ctx`**: a stable object exposing `data` and `config` (getters), `task` (a visible, cancellable job with the spinner), `note`, `confirm`, `prefill`, `showText`, `showPicker`, `copy`, `setConfig`. Read the `Object.assign(ctx, {...})` block before adding an action.
-- **`src/ui/*View.jsx`**: one component per tab. Views must check `ctx.viewHasKeys()` (or `ctx.overlayHasKeys()` in overlays) at the start of their `useInput` handlers. `useListNav` in `src/ui/hooks.js` is the shared cursor and scroll logic.
+- **`src/ui/*View.jsx`**: one component per tab: Requests (the list, and beside it the request or its response, drawn by `ui/response.js`), Response (the whole width), Log. Views must check `ctx.viewHasKeys()` (or `ctx.overlayHasKeys()` in overlays) at the start of their `useInput` handlers. `useListNav` in `src/ui/hooks.js` is the shared cursor and scroll logic.
 - **Mouse** (`src/mouse.js`, `src/selection.js`; Splice's `docs/mouse.md` has the design): `terminalMouse` strips mouse reports out of stdin before Ink sees them and hands them to `App` as the `mouse` prop; tests pass a fake (`test/clicks.test.js`). Components register with `useMouse(ctx, handler)`; a view's rows start one line under its panel's top border. Views name their `useInput` handler `keys` so a double-click can call `keys('', { return: true })`.
 - **Updates** (`src/update.js`): once a day, GitHub's releases API, then `gh api` while the repository is private. A newer release is installed in the background next to the executable, checked against `SHA256SUMS.txt`. Release file names must match `TARGETS` in `scripts/build.js`. `cli.jsx` passes `checkUpdate` and `installUpdate` only in compiled builds.
 - **Config** (`src/config.js`): `~/.hail/config.json`, overridable with `HAIL_HOME` (tests use it). Change it only through `ctx.setConfig`: `App` saves its whole copy. A new setting is a row in `src/settings.js` plus the README's Settings section.
@@ -40,7 +45,7 @@ Releases are automatic: every push to main (except Markdown-only ones) runs the 
 
 ## Tests
 
-`test/app.test.js` and `test/clicks.test.js` are end-to-end: they render `<App>` with `ink-testing-library`, type keys into stdin and assert on `lastFrame()`. Use `until(check, what)` from `test/helpers.js` to wait for frames rather than fixed sleeps. `test/units.test.js` covers the pure modules.
+`test/app.test.js` and `test/clicks.test.js` are end-to-end: they write a `.http` file into a temporary folder, start an HTTP server on 127.0.0.1, render `<App>` with `ink-testing-library`, type keys into stdin and assert on `lastFrame()`; nothing reaches the internet. `test/http.test.js` covers the format, variables, environments and sending. Use `until(check, what)` from `test/helpers.js` to wait for frames rather than fixed sleeps. `test/units.test.js` covers commands, help, settings, the pet and the updater.
 
 ## Keeping things in sync
 

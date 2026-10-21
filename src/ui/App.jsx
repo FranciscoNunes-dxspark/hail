@@ -1,26 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdin } from 'ink';
+import { watch } from 'node:fs';
+import { basename } from 'node:path';
 import * as a from '../actions.js';
+import { azToken as azCli } from '../azure.js';
 import { COMMANDS, findCommand, suggestionsFor } from '../commands.js';
 import { saveConfig } from '../config.js';
 import { HELP } from '../help.js';
 import { commandsSection, sectionFor } from '../help-layout.js';
-import { loadItems } from '../source.js';
+import { findHttpFiles, loadHttpFile } from '../files.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
 import { useTerminalSize } from './hooks.js';
 import { Confirm, Panel, PromptBox, Row, Spinner, Suggestions, confirmHeight } from './parts.jsx';
 import { HelpView } from './HelpView.jsx';
-import { ItemsView } from './ItemsView.jsx';
 import { LogView } from './LogView.jsx';
 import { Picker } from './Picker.jsx';
+import { RequestsView } from './RequestsView.jsx';
+import { ResponseView } from './ResponseView.jsx';
 import { TextViewer } from './TextViewer.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
 import { FACES, moodFor } from '../pet.js';
 
 const VIEWS = [
-  { id: 'items', label: 'Items' },
+  { id: 'requests', label: 'Requests' },
+  { id: 'response', label: 'Response' },
   { id: 'log', label: 'Log' },
 ];
 
@@ -28,20 +33,31 @@ const VIEWS = [
 const HELP_SECTIONS = [...HELP, commandsSection(COMMANDS)];
 
 const HINTS = {
-  items: '↵ show · y copy its name',
+  requests: '↵ send · c copy as curl · y copy the URL · v the response, full view · e environment',
+  response: '↵ send again · h headers · y copy the body · j/k space scroll',
   log: '↵ all its output · y copy it',
 };
 
 const firstLine = (s) => String(s ?? '').split('\n')[0];
 
-function Header({ data, width, loading, mood }) {
+function Header({ data, env, width, loading, mood }) {
   const segs = [
     { text: `${FACES[mood]} `, color: theme.accent, bold: true },
     { text: 'Hail', bold: true },
   ];
-  if (data) segs.push({ text: '  │  ', color: theme.border }, { text: `${data.items.length} items`, color: theme.dim });
-  else if (loading) segs.push({ text: '  loading…', color: theme.dim });
-  return <Row pointer={false} width={width} segments={segs} />;
+  if (data) {
+    segs.push({ text: '  │  ', color: theme.border }, { text: data.name, bold: true });
+    segs.push({ text: '  env ', color: theme.dim }, { text: env ?? (data.environments.names.length ? 'none' : '—'), color: env ? theme.warn : theme.dim, bold: Boolean(env) });
+  } else if (loading) segs.push({ text: '  loading…', color: theme.dim });
+  const path = data?.dir ?? '';
+  return <Row pointer={false} width={width} segments={[...fitSegments(segs, Math.max(20, width - stringWidth(path) - 1)), { text: ' ' }, { text: path, color: theme.dim }]} />;
+}
+
+/** The environment to use for `data`: the one picked for this file last time, else dev or local, else none. */
+export function defaultEnvironment(data, saved) {
+  const names = data?.environments.names ?? [];
+  if (saved && names.includes(saved)) return saved;
+  return names.find((n) => /^(dev|local)/i.test(n)) ?? null;
 }
 
 /** The tabs' labels and the columns each one covers (`from` up to `to`), which clicks are matched against. */
@@ -83,17 +99,23 @@ function activityRows(entries) {
 
 const DOUBLE_CLICK_MS = 400;
 
-// `load` reads the data (source.js's loadItems; tests pass their own). `mouse` is mouse.js's
+// `initialFile` is the .http file to open (none: Hail says how to open or make one). `load` reads it
+// (files.js's loadHttpFile; tests may pass their own), `azToken` answers {{$azToken}}. `mouse` is mouse.js's
 // terminalMouse() from cli.jsx (missing where the terminal can't report it); tests pass their own.
 // `copy` puts text on the clipboard (cli.jsx's; tests pass a stub). `checkUpdate` and `installUpdate`
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
-export function App({ config: initialConfig, load = loadItems, checkUpdate, installUpdate, setTitle, mouse, copy }) {
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, checkUpdate, installUpdate, setTitle, mouse, copy }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('items');
+  const [view, setView] = useState('requests');
+  // What came back, by request label: { request, response, at }, `request` as it was sent.
+  const [responses, setResponses] = useState({});
+  const responsesRef = useRef({});
+  const selectedRef = useRef(0);
+  const fileRef = useRef(initialFile ?? null);
   const [focus, setFocusState] = useState('view');
   const [prompt, setPromptState] = useState({ value: '', cursor: 0 });
   const [sugIndex, setSugIndex] = useState(0);
@@ -180,16 +202,36 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
   };
 
   const reload = async () => {
+    const file = fileRef.current;
+    if (!file) return setLoading(false);
     try {
-      const items = await load();
-      dataRef.current = { items };
-      setData(dataRef.current);
+      const d = await load(file);
+      if (fileRef.current !== file) return;
+      dataRef.current = d;
+      setData(d);
     } catch (e) {
-      note(`Couldn't load: ${firstLine(e.message)}`, 'error');
+      note(`Couldn't read ${basename(file)}: ${firstLine(e.message)}`, 'error');
     } finally {
       setLoading(false);
     }
   };
+
+  const openFile = async (file) => {
+    fileRef.current = file;
+    dataRef.current = null;
+    setData(null);
+    setLoading(true);
+    responsesRef.current = {};
+    setResponses({});
+    selectedRef.current = 0;
+    setOverlay(null);
+    setView('requests');
+    await reload();
+    if (dataRef.current) setConfig((c) => ({ ...c, recent: [file, ...(c.recent ?? []).filter((f) => f !== file)].slice(0, 20) }));
+  };
+
+  // The environment picked for this file (kept in the config, by file), if it still has it.
+  const environment = () => defaultEnvironment(dataRef.current, configRef.current.environments?.[dataRef.current?.path]);
 
   // One command at a time, with the spinner, esc to cancel, and a line in the activity log.
   // `start(signal)` resolves with { stdout, stderr }.
@@ -249,6 +291,31 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
   const ctx = ctxRef.current;
   Object.assign(ctx, {
     task,
+    openFile,
+    environment,
+    setEnvironment: (name) => {
+      const path = dataRef.current?.path;
+      if (!path) return;
+      setConfig((c) => ({ ...c, environments: { ...c.environments, [path]: name } }));
+      note(`Variables now come from ${name}`);
+    },
+    // Where {{variables}} come from: the environment, the file's @variables, the responses so far by name.
+    scope: () => {
+      const d = dataRef.current;
+      const env = environment();
+      const named = {};
+      for (const r of d?.requests ?? []) if (r.name && responsesRef.current[r.label]) named[r.name] = responsesRef.current[r.label].response;
+      return { environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}), file: d?.variables ?? {}, responses: named, env: { azToken } };
+    },
+    // The views say which request the cursor is on, so commands and the Response view act on it.
+    selectRequest: (i) => (selectedRef.current = i),
+    selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
+    selectedIndex: () => selectedRef.current,
+    setResponse: (request, sentAs, response) => {
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at: Date.now() } };
+      setResponses(responsesRef.current);
+    },
+    send: (request) => a.send(ctx, request),
     note,
     confirm,
     prefill,
@@ -340,6 +407,7 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
   useEffect(() => {
     (async () => {
       await reload();
+      if (!fileRef.current) note('No .http file here. /new writes an example to start from; /open <file> opens one.');
       // After the first load, so it doesn't slow it down.
       if (checkUpdate && configRef.current.checkForUpdates !== false) {
         checkUpdate(configRef.current.lastUpdateCheck).then(
@@ -371,19 +439,42 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
     })();
   }, []);
 
+  // The file reloads when it's saved, so it can be edited beside Hail.
+  useEffect(() => {
+    if (!data?.path) return;
+    let t;
+    let watcher;
+    try {
+      watcher = watch(data.dir, (_, name) => {
+        if (name && name !== data.name && !/http-client(\.private)?\.env\.json$/.test(name)) return;
+        clearTimeout(t);
+        t = setTimeout(() => reload(), 150);
+      });
+    } catch {
+      // Some file systems can't be watched; r reloads.
+      return;
+    }
+    return () => {
+      clearTimeout(t);
+      watcher.close();
+    };
+  }, [data?.path]);
+
   // cli.jsx passes the terminal's title setter; tests pass a stub or nothing.
-  const title = `${VIEWS.find((v) => v.id === view).label} — Hail`;
+  const title = data ? `${data.name} — Hail` : 'Hail';
   useEffect(() => {
     setTitle?.(title);
   }, [title]);
 
-  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { data }) : [];
+  // .http files to /open, looked for while that's being typed.
+  const files = focus === 'prompt' && prompt.value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [];
+  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { data, files }) : [];
   const sel = Math.min(sugIndex, Math.max(0, suggestions.length - 1));
 
   // Line editing in the prompt.
   const promptKeys = (input, key) => {
     const { value, cursor } = promptRef.current;
-    const items = suggestionsFor(value, { data: dataRef.current });
+    const items = suggestionsFor(value, { data: dataRef.current, files: value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [] });
     const pick = items[Math.min(sugIndex, items.length - 1)];
     const edit = (v, c) => {
       setPrompt(v, c);
@@ -445,6 +536,7 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
       return setView(VIEWS[(i + (key.shift ? VIEWS.length - 1 : 1)) % VIEWS.length].id);
     }
     if (input === 'r') return ctx.refresh();
+    if (input === 'e') return a.chooseEnvironment(ctx);
   };
 
   // One dispatcher reading focus from refs, which change the instant focus moves. Handlers that
@@ -571,11 +663,14 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
   } else if (!data) {
     main = (
       <Panel title={VIEWS.find((v) => v.id === view).label} width={W} height={mainH}>
-        <Text color={theme.dim}>{loading ? '  Loading…' : "  Nothing loaded. r tries again."}</Text>
+        <Text color={theme.dim}>{loading ? '  Loading…' : fileRef.current ? '  The file couldn\'t be read: r tries again.' : '  No .http file open. /new writes an example; /open <file> opens one.'}</Text>
       </Panel>
     );
+  } else if (view === 'response') {
+    const request = ctx.selectedRequest();
+    main = <ResponseView request={request} sent={request ? responses[request.label] : null} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else {
-    main = <ItemsView data={data} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+    main = <RequestsView data={data} responses={responses} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   }
 
   const left = flash
@@ -593,7 +688,7 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
 
   return (
     <Box flexDirection="column" width={W} height={H}>
-      <Header data={data} width={W} loading={loading} mood={mood} />
+      <Header data={data} env={environment()} width={W} loading={loading} mood={mood} />
       <Tabs view={view} entries={entries} width={W} />
       <Box height={mainH} width={W}>
         {main}
@@ -606,7 +701,7 @@ export function App({ config: initialConfig, load = loadItems, checkUpdate, inst
       {confirmReq ? (
         <Confirm key={confirmReq.id} req={confirmReq} width={W} onDone={onConfirm} />
       ) : (
-        <PromptBox value={prompt.value} cursor={prompt.cursor} focused={focus === 'prompt'} width={W} placeholder="Press / for commands, ! to run a shell command, ? for shortcuts" />
+        <PromptBox value={prompt.value} cursor={prompt.cursor} focused={focus === 'prompt'} width={W} placeholder="↵ sends the request · / for commands · e environment · ? for shortcuts" />
       )}
       {suggestions.length ? <Suggestions items={suggestions} selected={sel} width={W} /> : null}
       <Row
