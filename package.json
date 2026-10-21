@@ -1,0 +1,31 @@
+{
+  "name": "hail",
+  "version": "0.1.0",
+  "description": "An HTTP client for the terminal, over .http files",
+  "type": "module",
+  "bin": {
+    "hail": "bin/hail.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/hail.js",
+    "test": "node --import ./src/register.js --test test/*.test.js",
+    "build": "npx --yes bun@1.4.2 scripts/build.js",
+    "build:all": "npx --yes bun@1.4.2 scripts/build.js --all",
+    "postinstall": "patch-package"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "cli-truncate": "^4.0.0",
+    "esbuild": "^0.25.10",
+    "ink": "^6.8.0",
+    "react": "^19.2.0",
+    "string-width": "^7.2.0"
+  },
+  "devDependencies": {
+    "ink-testing-library": "^4.0.0",
+    "patch-package": "^8.0.1"
+  }
+}
