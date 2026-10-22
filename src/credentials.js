@@ -1,7 +1,7 @@
-// Secrets for {{$secret name}}, kept in the operating system's credential store and never in a file:
-// Windows Credential Manager, the macOS Keychain, or the Secret Service keyring on Linux (secret-tool),
-// as Trawl keeps its passwords. Each is reached through a tool the system already has, no native
-// module, so the compiled build works too. A secret only ever travels on stdin or stdout, never argv,
+// Saved passwords, kept in the operating system's credential store and never in config.json:
+// Windows Credential Manager, the macOS Keychain, or the Secret Service keyring on Linux
+// (secret-tool). Each is reached through a tool the system already has, no native module, so
+// the compiled build works too. A password only ever travels on stdin or stdout, never argv,
 // except on macOS, whose `security` tool takes it as an argument.
 import { execFile } from 'node:child_process';
 
@@ -20,7 +20,7 @@ function run(file, args, { input, signal } = {}) {
       err.stdout = stdout;
       reject(err);
     });
-    // A program that exits without reading its input closes the pipe first.
+    // A tool that exits without reading its input (a keyring that refuses at once) closes the pipe first.
     child.stdin.on('error', () => {});
     child.stdin.end(input ?? '');
   });
@@ -76,7 +76,7 @@ function windows(op, name, { user, password, signal } = {}) {
       if (op === 'get' && err.code === 3) return resolve(null);
       reject(new Error(`${STORE_NAME} refused it: ${(stderr || err.message).trim().split('\n')[0]}`));
     });
-    // A program that exits without reading its input closes the pipe first.
+    // A tool that exits without reading its input (a keyring that refuses at once) closes the pipe first.
     child.stdin.on('error', () => {});
     child.stdin.end(op === 'set' ? b64(password) : '');
   });
@@ -95,7 +95,7 @@ export const osCredentials = {
   async set(name, { user, password }) {
     if (process.platform === 'win32') await windows('set', name, { user, password });
     else if (process.platform === 'darwin') await run('security', ['add-generic-password', '-U', '-s', SERVICE, '-a', name, '-l', `${SERVICE} ${name}`, '-w', password]);
-    else await run('secret-tool', ['store', `--label=${SERVICE} ${name}`, 'service', SERVICE, 'secret', name], { input: password });
+    else await run('secret-tool', ['store', `--label=${SERVICE} ${name}`, 'service', SERVICE, 'connection', name], { input: password });
     cache.set(name, password);
   },
   async remove(name) {
@@ -103,7 +103,7 @@ export const osCredentials = {
     try {
       if (process.platform === 'win32') await windows('remove', name);
       else if (process.platform === 'darwin') await run('security', ['delete-generic-password', '-s', SERVICE, '-a', name]);
-      else await run('secret-tool', ['clear', 'service', SERVICE, 'secret', name]);
+      else await run('secret-tool', ['clear', 'service', SERVICE, 'connection', name]);
     } catch {
       // Nothing saved is fine: forgetting is the point.
     }
@@ -119,7 +119,7 @@ async function lookup(name, { signal } = {}) {
     const out =
       process.platform === 'darwin'
         ? await run('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w'], { signal })
-        : await run('secret-tool', ['lookup', 'service', SERVICE, 'secret', name], { signal });
+        : await run('secret-tool', ['lookup', 'service', SERVICE, 'connection', name], { signal });
     return out.replace(/\r?\n$/, '') || null;
   } catch (e) {
     // Not found is exit 44 for security and 1 for secret-tool; a missing tool still says so.

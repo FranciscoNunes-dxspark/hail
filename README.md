@@ -124,6 +124,32 @@ drag to select text, which is copied when you let go.
 Beside the list is the request under the cursor as written, or, once it's been sent, its response:
 the status, how long it took, its size, and the body, JSON indented.
 
+### The command palette
+
+`ctrl+p` opens a list of everything you can do from where you are: the keys of the view you're in,
+your own keys and commands, and every slash command. Type to narrow it (the words can come in any
+order and needn't be whole), `↑`/`↓` pick, `↵` runs the one picked, `esc` closes it. A key runs as if
+you'd pressed it in the view; a command that needs something typed after it goes into the prompt for
+you to finish.
+
+### Your own commands and keys
+
+Commands of your own go in the settings file (`~/.hail/config.json`), under `"commands"`, and keys
+under `"keys"`, for every view (`"global"`) or for one (requests, response, history, log):
+
+```json
+{
+  "commands": { "dev": "/env dev", "login": ["/env dev", "/send login"] },
+  "keys": { "global": { "ctrl+s": "/send" }, "response": { "H": "h" } }
+}
+```
+
+A command is a line as you'd type it at the prompt, or a list of them run in order, stopping at the
+first that fails or asks a question you answer no to. `$1`, `$2`… are the words typed after it, `$*`
+all of them. A key maps to another key (the view does what that one does) or to a command line. What
+can't be used is said in the activity lines when Hail starts. These work as they do in Splice
+and Trawl.
+
 ## Commands
 
 | Command | What it does |

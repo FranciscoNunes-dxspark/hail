@@ -20,12 +20,13 @@ export const COMMANDS = [
   { name: 'quit', desc: 'Exit Hail', run: (ctx) => ctx.quit() },
 ];
 
-/** Exact name, or an unambiguous prefix of one. */
-export function findCommand(name) {
+/** Exact name, or an unambiguous prefix of one; `user` are your own commands (usercommands.js), after the built-in ones. */
+export function findCommand(name, user = []) {
   const n = name.toLowerCase();
-  const exact = COMMANDS.find((c) => c.name === n);
+  const all = [...COMMANDS, ...user];
+  const exact = all.find((c) => c.name === n);
   if (exact) return exact;
-  const matches = COMMANDS.filter((c) => c.name.startsWith(n));
+  const matches = all.filter((c) => c.name.startsWith(n));
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -48,18 +49,19 @@ function ranked(names, query) {
  * list a command completes its argument from. `insert` replaces the prompt text; `run` means picking
  * it can run straight away.
  */
-export function suggestionsFor(value, { data, files = [] } = {}) {
+export function suggestionsFor(value, { data, files = [], user = [] } = {}) {
   if (!value.startsWith('/')) return [];
   const space = value.indexOf(' ');
+  const all = [...COMMANDS, ...user];
   if (space < 0) {
-    const names = ranked(COMMANDS.map((c) => c.name), value.slice(1));
+    const names = ranked(all.map((c) => c.name), value.slice(1));
     return names.slice(0, 7).map((name) => {
-      const c = COMMANDS.find((x) => x.name === name);
+      const c = all.find((x) => x.name === name);
       const optional = !c.args || c.args.startsWith('[');
       return { label: `/${c.name}`, hint: c.args ?? '', desc: c.desc, insert: `/${c.name}${optional ? '' : ' '}`, run: optional };
     });
   }
-  const cmd = findCommand(value.slice(1, space));
+  const cmd = findCommand(value.slice(1, space), user);
   const rest = value.slice(space + 1);
   if (!cmd?.complete) return [];
   const names = ranked(completions(cmd.complete, data, files), rest);
