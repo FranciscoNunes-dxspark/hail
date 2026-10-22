@@ -6,7 +6,7 @@ export const HELP = [
   {
     title: 'Anywhere',
     rows: [
-      ['1-3 / tab', 'Requests, Response, Log (shift+tab goes back)'],
+      ['1-4 / tab', 'Requests, Response, History, Log (shift+tab goes back)'],
       ['/ or :', 'Command prompt (slash commands, with completion)'],
       ['e', 'Pick the environment the variables come from'],
       ['!', 'Run a shell command, e.g.  !node --version'],
@@ -45,6 +45,19 @@ export const HELP = [
       ['h', 'Show or hide the headers'],
       ['y', 'Copy the body'],
       ['↵', 'Send the request again'],
+      ['/', 'Search the response: matches show as you type, ↵ keeps it (a capital letter makes it match case)'],
+      ['n N', 'Next, previous match · esc clears the search'],
+    ],
+  },
+  {
+    title: 'History',
+    about: "every response to this file's requests, newest first, kept across runs (secrets and credential headers left out)",
+    views: ['history'],
+    rows: [
+      ['↵', 'The request as sent and what came back'],
+      ['d', 'How it differs from the response before it to the same request'],
+      ['y', 'Copy the body'],
+      ['D', 'Forget them all (/history clear)'],
     ],
   },
   {
@@ -56,6 +69,7 @@ export const HELP = [
       ['{{login.response.body.token}}', 'From the response to the request named login (# @name login); .headers.Name for a header'],
       ['{{$uuid}} {{$timestamp}}', 'Built-ins; also $isoTimestamp, $randomInt min max, $processEnv NAME, $env.NAME'],
       ['{{$azToken resource}}', "A token from the Azure CLI's sign-in (az login)"],
+      ['{{$secret name}}', "A secret kept in the system's credential store, asked for the first time it's used (/secret saves or replaces one)"],
     ],
   },
   {

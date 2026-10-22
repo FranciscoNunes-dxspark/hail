@@ -7,9 +7,11 @@ const PLACEHOLDER = /\{\{\s*(.+?)\s*\}\}/g;
 
 /**
  * The built-ins, by name; each takes its arguments (what follows the name, split on spaces). `now`,
- * `random` and `processEnv` stand in for the real ones in tests; `azToken(resource)` returns a token.
+ * `random` and `processEnv` stand in for the real ones in tests; `azToken(resource)` returns a token,
+ * `secret(name)` a saved secret (or null). Every secret filled in is added to `used`, so what's kept
+ * of a request afterwards can leave it out.
  */
-export function builtins({ now = () => Date.now(), random = Math.random, processEnv = process.env, uuid = randomUUID, azToken } = {}) {
+export function builtins({ now = () => Date.now(), random = Math.random, processEnv = process.env, uuid = randomUUID, azToken, secret, used } = {}) {
   const env = (name) => processEnv[name];
   return {
     $timestamp: () => String(Math.floor(now() / 1000)),
@@ -19,7 +21,16 @@ export function builtins({ now = () => Date.now(), random = Math.random, process
     '$random.uuid': () => uuid(),
     $randomInt: ([min = '0', max = '1000']) => String(Math.floor(Number(min) + random() * (Number(max) - Number(min)))),
     $processEnv: ([name]) => env(name),
-    $azToken: ([resource]) => azToken?.(resource),
+    $azToken: async ([resource]) => {
+      const token = await azToken?.(resource);
+      if (token) used?.add(token);
+      return token;
+    },
+    $secret: async ([name]) => {
+      const value = name ? await secret?.(name) : null;
+      if (value) used?.add(value);
+      return value ?? undefined;
+    },
   };
 }
 

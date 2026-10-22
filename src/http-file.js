@@ -17,7 +17,9 @@ const SEPARATOR = /^###/;
 const COMMENT = /^\s*(#|\/\/)/;
 const NAME = /^\s*(?:#|\/\/)\s*@name\s+(\S+)/;
 const FILE_VARIABLE = /^\s*@([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$/;
-const REQUEST_LINE = new RegExp(`^\\s*(?:(${METHODS.join('|')})\\s+)?(\\S+)(?:\\s+HTTP\\/[\\d.]+)?\\s*$`, 'i');
+// The URL may hold spaces inside {{...}} ({{$randomInt 1 10}}). Without a method, a line only counts
+// as a request when it starts like a URL, so stray text above a request isn't taken for one.
+const REQUEST_LINE = new RegExp(`^\\s*(?:(?:(${METHODS.join('|')})\\s+(.+?))|((?:https?:\\/\\/|\\{\\{|\\/).*?))(?:\\s+HTTP\\/[\\d.]+)?\\s*$`, 'i');
 const HEADER = /^\s*([^:\s][^:]*?)\s*:\s*(.*?)\s*$/;
 
 /**
@@ -52,7 +54,7 @@ export function parseHttpFile(text) {
       }
       const m = REQUEST_LINE.exec(l);
       if (!m) continue;
-      request = { method: (m[1] ?? 'GET').toUpperCase(), url: m[2], line: i + 1 };
+      request = { method: (m[1] ?? 'GET').toUpperCase(), url: m[2] ?? m[3], line: i + 1 };
       i++;
       break;
     }

@@ -53,6 +53,9 @@ test('the file: its variables, and each request with its name, headers and body'
   assert.deepEqual(upload.bodyFile, { path: './body.json', fill: true });
   assert.deepEqual([plain.method, plain.url, plain.label], ['GET', 'https://example.com/plain', 'GET https://example.com/plain']);
   assert.equal(requestAtLine(requests, 16).name, 'login');
+  // A URL with spaces inside a placeholder; text that isn't a URL isn't a request.
+  const odd = parseHttpFile('just some words\n\n###\nGET {{host}}/{{$randomInt 1 10}} HTTP/1.1\n\n###\n{{host}}/plain\n').requests;
+  assert.deepEqual(odd.map((r) => [r.method, r.url]), [['GET', '{{host}}/{{$randomInt 1 10}}'], ['GET', '{{host}}/plain']]);
   assert.equal(requestAtLine(requests, 1).name, 'List the users', 'above the first, the first');
 });
 

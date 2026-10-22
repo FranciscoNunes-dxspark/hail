@@ -4,13 +4,16 @@ import { isAbsolute, join } from 'node:path';
 import { fill } from './variables.js';
 
 /**
- * The request with every placeholder filled in: { method, url, headers, body, missing }, `missing`
- * being the variables nothing answered. A body from a file is read relative to the .http file's `dir`.
+ * The request with every placeholder filled in: { method, url, headers, body, missing, secrets },
+ * `missing` being the variables nothing answered and `secrets` the secret values and tokens filled in.
+ * A body from a file is read relative to the .http file's `dir`.
  */
 export async function prepare(request, scope, { dir = process.cwd(), read = (p) => readFile(p, 'utf8') } = {}) {
   const missing = [];
+  const used = new Set();
+  const inner = { ...scope, env: { ...scope?.env, used } };
   const f = async (text) => {
-    const r = await fill(text, scope);
+    const r = await fill(text, inner);
     missing.push(...r.missing);
     return r.text;
   };
@@ -23,7 +26,7 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
     const text = await read(isAbsolute(path) ? path : join(dir, path));
     body = request.bodyFile.fill ? await f(text) : text;
   }
-  return { method: request.method, url, headers, body, missing: [...new Set(missing)] };
+  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used] };
 }
 
 /**

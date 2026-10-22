@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { setAccent } from './theme.js';
 import { App } from './ui/App.jsx';
 import { findHttpFiles } from './files.js';
+import { ask } from './claude.js';
 import { checkForUpdate, installUpdate, removeOldExecutables } from './update.js';
 import { copyToClipboard } from './clipboard.js';
 import { terminalMouse } from './mouse.js';
@@ -56,7 +57,7 @@ const copy = (text) => copyToClipboard(text);
 const given = args.find((x) => !x.startsWith('-'));
 const file = given ? resolve(given) : findHttpFiles(process.cwd()).map((f) => resolve(f))[0];
 const app = render(
-  <App config={config} initialFile={file} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} />,
+  <App config={config} initialFile={file} askClaude={ask} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} />,
   // Through the mouse's stdout, which watches the frames to select text from.
   { exitOnCtrlC: false, stdout: mouse?.stdout ?? process.stdout },
 );

@@ -5,6 +5,14 @@ import { formatSize, prettyBody } from '../send.js';
 import { theme } from '../theme.js';
 import { relTime, wrap } from '../text.js';
 
+/** A line wrapped to `width`, its indent kept on every part (wrap would drop it, and JSON needs it). */
+export function wrapIndented(line, width) {
+  if (!line) return [''];
+  const indent = /^\s*/.exec(line)[0];
+  const room = Math.max(10, width - indent.length);
+  return wrap(line.slice(indent.length), room).map((part) => indent + part);
+}
+
 export const statusColour = (status) => (status < 300 ? theme.add : status < 400 ? theme.info : status < 500 ? theme.warn : theme.del);
 
 export const METHOD_COLOURS = { GET: '#5fafff', POST: '#5fd75f', PUT: '#ffaf5f', PATCH: '#d7af5f', DELETE: '#ff5f5f' };
@@ -15,7 +23,7 @@ export function requestLines(request, width) {
   const out = [[{ text: `${request.method} `, color: methodColour(request.method), bold: true }, { text: request.url }]];
   for (const [k, v] of request.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   if (request.bodyFile) out.push([], [{ text: `< ${request.bodyFile.path}`, color: theme.dim }]);
-  else if (request.body) out.push([], ...request.body.split('\n').flatMap((l) => (l ? wrap(l, width) : [''])).map((l) => [{ text: l }]));
+  else if (request.body) out.push([], ...request.body.split('\n').flatMap((l) => wrapIndented(l, width)).map((l) => [{ text: l }]));
   return out;
 }
 
@@ -31,6 +39,6 @@ export function responseLines(sent, width, { headers = false } = {}) {
   if (r.url !== sent.request.url) out.push([{ text: `→ ${r.url}`, color: theme.dim }]);
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);
-  for (const l of prettyBody(r).split('\n')) for (const part of l ? wrap(l, width) : ['']) out.push([{ text: part }]);
+  for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) out.push([{ text: part }]);
   return out;
 }

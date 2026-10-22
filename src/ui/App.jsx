@@ -4,6 +4,8 @@ import { watch } from 'node:fs';
 import { basename } from 'node:path';
 import * as a from '../actions.js';
 import { azToken as azCli } from '../azure.js';
+import { osCredentials } from '../credentials.js';
+import { appendHistory, clearHistory, entryFor, historyFile, latestByLabel, readHistory } from '../history.js';
 import { COMMANDS, findCommand, suggestionsFor } from '../commands.js';
 import { saveConfig } from '../config.js';
 import { HELP } from '../help.js';
@@ -13,7 +15,8 @@ import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
 import { useTerminalSize } from './hooks.js';
-import { Confirm, Panel, PromptBox, Row, Spinner, Suggestions, confirmHeight } from './parts.jsx';
+import { Confirm, Panel, PromptBox, Row, SecretPrompt, Spinner, Suggestions, confirmHeight } from './parts.jsx';
+import { HistoryView } from './HistoryView.jsx';
 import { HelpView } from './HelpView.jsx';
 import { LogView } from './LogView.jsx';
 import { Picker } from './Picker.jsx';
@@ -26,6 +29,7 @@ import { FACES, moodFor } from '../pet.js';
 const VIEWS = [
   { id: 'requests', label: 'Requests' },
   { id: 'response', label: 'Response' },
+  { id: 'history', label: 'History' },
   { id: 'log', label: 'Log' },
 ];
 
@@ -35,6 +39,7 @@ const HELP_SECTIONS = [...HELP, commandsSection(COMMANDS)];
 const HINTS = {
   requests: '↵ send · c copy as curl · y copy the URL · v the response, full view · e environment',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
+  history: '↵ show it · d compare with the one before · D forget them all',
   log: '↵ all its output · y copy it',
 };
 
@@ -100,11 +105,13 @@ function activityRows(entries) {
 const DOUBLE_CLICK_MS = 400;
 
 // `initialFile` is the .http file to open (none: Hail says how to open or make one). `load` reads it
-// (files.js's loadHttpFile; tests may pass their own), `azToken` answers {{$azToken}}. `mouse` is mouse.js's
+// (files.js's loadHttpFile; tests may pass their own), `azToken` answers {{$azToken}}, `credentials` keeps
+// {{$secret}}s (credentials.js's; tests pass memoryCredentials), `askClaude` is claude.js's ask from cli.jsx
+// (tests pass a stub; without it /draft says Claude isn't available). `mouse` is mouse.js's
 // terminalMouse() from cli.jsx (missing where the terminal can't report it); tests pass their own.
 // `copy` puts text on the clipboard (cli.jsx's; tests pass a stub). `checkUpdate` and `installUpdate`
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, checkUpdate, installUpdate, setTitle, mouse, copy }) {
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -116,6 +123,9 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const responsesRef = useRef({});
   const selectedRef = useRef(0);
   const fileRef = useRef(initialFile ?? null);
+  // The responses kept for the open file, oldest first (history.js), and the file they're kept in.
+  const [history, setHistory] = useState([]);
+  const historyRef = useRef({ file: null, entries: [] });
   const [focus, setFocusState] = useState('view');
   const [prompt, setPromptState] = useState({ value: '', cursor: 0 });
   const [sugIndex, setSugIndex] = useState(0);
@@ -207,8 +217,18 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     try {
       const d = await load(file);
       if (fileRef.current !== file) return;
+      const first = dataRef.current?.path !== d.path;
       dataRef.current = d;
       setData(d);
+      // Opened: what came back last time, so the responses and their variables carry on.
+      if (first) {
+        const hf = historyFile(d.path);
+        const entries = readHistory(hf);
+        historyRef.current = { file: hf, entries };
+        setHistory(entries);
+        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at }]));
+        setResponses(responsesRef.current);
+      }
     } catch (e) {
       note(`Couldn't read ${basename(file)}: ${firstLine(e.message)}`, 'error');
     } finally {
@@ -305,16 +325,40 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       const env = environment();
       const named = {};
       for (const r of d?.requests ?? []) if (r.name && responsesRef.current[r.label]) named[r.name] = responsesRef.current[r.label].response;
-      return { environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}), file: d?.variables ?? {}, responses: named, env: { azToken } };
+      return {
+        environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}),
+        file: d?.variables ?? {},
+        responses: named,
+        env: { azToken, secret: (name) => credentials.get(name) },
+      };
     },
     // The views say which request the cursor is on, so commands and the Response view act on it.
     selectRequest: (i) => (selectedRef.current = i),
     selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
     selectedIndex: () => selectedRef.current,
     setResponse: (request, sentAs, response) => {
-      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at: Date.now() } };
+      const at = Date.now();
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at } };
       setResponses(responsesRef.current);
+      const h = historyRef.current;
+      if (!h.file) return;
+      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response });
+      historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
+      setHistory(historyRef.current.entries);
     },
+    history: () => historyRef.current.entries,
+    clearHistory: () => {
+      const h = historyRef.current;
+      if (h.file) clearHistory(h.file);
+      historyRef.current = { file: h.file, entries: [] };
+      setHistory([]);
+      note('Forgot the responses kept for this file');
+    },
+    // A view that takes keys the app would otherwise use (the Response view's search) says so here.
+    claimsKey: null,
+    askSecret: (req) => confirm({ ...req, secret: true, options: [] }),
+    credentials,
+    askClaude,
     send: (request) => a.send(ctx, request),
     note,
     confirm,
@@ -547,6 +591,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     if (focusRef.current === 'prompt' && !confirmRef.current) return prefillKey.current === keySeq.current ? undefined : promptKeys(input, key);
     if (key.ctrl && input === 'c') return exit();
     if (confirmRef.current || overlayRef.current || answerKey.current === keySeq.current) return;
+    if (ctx.claimsKey?.(input, key)) return;
     globalKeys(input, key);
   });
 
@@ -666,6 +711,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         <Text color={theme.dim}>{loading ? '  Loading…' : fileRef.current ? '  The file couldn\'t be read: r tries again.' : '  No .http file open. /new writes an example; /open <file> opens one.'}</Text>
       </Panel>
     );
+  } else if (view === 'history') {
+    main = <HistoryView entries={history} data={data} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else if (view === 'response') {
     const request = ctx.selectedRequest();
     main = <ResponseView request={request} sent={request ? responses[request.label] : null} ctx={ctx} width={W} height={mainH} active={viewActive} />;
@@ -699,7 +746,11 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       ))}
       {busy ? <Spinner label={busy.label} started={busy.started} width={W} /> : null}
       {confirmReq ? (
-        <Confirm key={confirmReq.id} req={confirmReq} width={W} onDone={onConfirm} />
+        confirmReq.secret ? (
+          <SecretPrompt key={confirmReq.id} req={confirmReq} width={W} onDone={onConfirm} />
+        ) : (
+          <Confirm key={confirmReq.id} req={confirmReq} width={W} onDone={onConfirm} />
+        )
       ) : (
         <PromptBox value={prompt.value} cursor={prompt.cursor} focused={focus === 'prompt'} width={W} placeholder="↵ sends the request · / for commands · e environment · ? for shortcuts" />
       )}

@@ -10,6 +10,9 @@ export const theme = {
   info: '#5fafd7',
   warn: '#ffd75f',
   bangMode: '#ff87d7',
+  // Behind search matches in a response, and the current one.
+  match: '#5f5f00',
+  matchHere: '#af8700',
 };
 
 // Windows terminals draw ⏺ as a wide emoji, so use the plain circle there (as Claude Code does).

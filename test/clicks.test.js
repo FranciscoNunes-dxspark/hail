@@ -62,7 +62,7 @@ test('clicks pick rows and tabs, the wheel scrolls the list, and a copy is said'
     mouse.wheel(p.x, p.y, 3);
     await until(() => !frame().includes('Request 1 '), 'the list scrolled by the wheel');
 
-    p = at(frame(), '3 Log');
+    p = at(frame(), '4 Log');
     mouse.click(p.x, p.y);
     await until(() => frame().includes('Nothing has run yet'), 'the Log tab');
 

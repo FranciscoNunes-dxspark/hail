@@ -5,11 +5,16 @@ import { wrap } from '../text.js';
 import { useMouse } from './hooks.js';
 import { Panel, Row } from './parts.jsx';
 
-/** Text over the view (ctx.showText): a command's output, an item. Scrolls; esc or q closes it. */
-export function TextViewer({ title, text, loading, ctx, width, height, active, onClose }) {
+/**
+ * Text over the view (ctx.showText): a command's output, a past response, a diff. `lines` (rows of
+ * segments) draws it in colour instead of `text`, which y still copies. Scrolls; esc or q closes it.
+ */
+export function TextViewer({ title, text, lines: given, loading, ctx, width, height, active, onClose }) {
   const innerW = width - 4;
   const innerH = height - 2;
-  const lines = loading ? ['Loading…'] : String(text ?? '').split('\n').flatMap((l) => (l ? wrap(l, innerW) : ['']));
+  const lines = loading
+    ? [[{ text: 'Loading…', color: theme.dim }]]
+    : (given ?? String(text ?? '').split('\n').flatMap((l) => (l ? wrap(l, innerW) : [''])).map((l) => [{ text: l }]));
   const [top, setTopState] = useState(0);
   const topRef = useRef(0);
   const max = Math.max(0, lines.length - innerH);
@@ -39,7 +44,7 @@ export function TextViewer({ title, text, loading, ctx, width, height, active, o
   return (
     <Panel title={title} hint={`${pos}esc close`} width={width} height={height} focused={active}>
       {lines.slice(shown, shown + innerH).map((l, i) => (
-        <Row key={i} pointer={false} width={width - 2} segments={[{ text: ` ${l}`, color: loading ? theme.dim : undefined }]} />
+        <Row key={i} pointer={false} width={width - 2} segments={[{ text: ' ' }, ...l]} />
       ))}
     </Panel>
   );

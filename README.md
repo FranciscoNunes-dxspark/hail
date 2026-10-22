@@ -63,22 +63,51 @@ Hail reads the file again whenever it's saved, so it can sit beside your editor.
 | The environment | `http-client.env.json` beside the file: `{ "dev": { "host": "http://localhost:3000" }, "prod": { ... } }`, with `"$shared"` going into every one. `http-client.private.env.json` beside it goes over it, for secrets kept out of git. `e` picks the environment; Hail starts on one called dev or local and remembers the choice for each file |
 | The file | `@name = value` lines |
 | Earlier responses | `{{login.response.body.token}}` is the `token` field of what the request named `login` (`# @name login`) got back; a path like `data.items[0].id` (or `$.data…`) reaches further in, `.headers.X-Request-Id` reads a header |
+| Secrets | `{{$secret api-key}}`: kept in the system's own credential store (Windows Credential Manager, the macOS Keychain, the Secret Service keyring on Linux), never in a file. The first request that needs one asks for it in a hidden field and saves it; `/secret <name>` saves or replaces one, `/secret` lists them to replace or forget |
 | Built-ins | `{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt 1 100}}`, `{{$processEnv NAME}}` or `{{$env.NAME}}` (this computer's environment), `{{$azToken [resource]}}` (a token from the Azure CLI's sign-in, Azure Resource Manager's unless a resource is named) |
 
-The environment wins over the file, so a file can hold defaults that environments override. A
+A secret can sit in an environment file too (`"apiKey": "{{$secret prod-api-key}}"`), so the file can
+be committed. The environment wins over the file, so a file can hold defaults that environments override. A
 variable can be made of others. A request with a variable nothing gives a value isn't sent: Hail
 says which.
+
+### History
+
+Every response is kept, across runs, in `~/.hail/history` (one file per `.http` file). When a file is
+opened, each request's last response is there again, so its variables work before anything is sent.
+The History tab lists them newest first: `↵` shows one, `d` compares it with the response before it to
+the same request, `D` forgets them all. What's kept leaves out the secrets and Azure tokens that were
+filled in, wherever they turn up (the server's answer too), and hides the headers that carry
+credentials (`Authorization`, `Cookie`, `Set-Cookie`, API keys and anything named like a token or
+password). Bodies over 512 KB are cut. The newest 300 responses per file are kept.
+
+### Claude drafts requests
+
+`/draft <openapi.json, a URL, or any file> [what to write]` hands an API description to Claude (through
+Claude Code, signed in as you are) and asks for requests in this format: a name for each, path
+parameters and auth as variables, example bodies, and the file's own variables used rather than
+declared again. The draft shows first; it's added to the open file only once you say yes (a new
+`requests.http` if none is open). The description can be an OpenAPI or Swagger document, or the code
+that defines the routes.
+
+```
+/draft openapi.json the order endpoints
+/draft https://petstore3.swagger.io/api/v3/openapi.json
+/draft ../server/routes.js
+```
 
 ## Keys
 
 | Key | What it does |
 | --- | --- |
-| `1` `2` `3` / `tab` | Requests, Response, Log (`shift+tab` goes back) |
+| `1` `2` `3` `4` / `tab` | Requests, Response, History, Log (`shift+tab` goes back) |
 | `↵` | Send the request under the cursor; in Response, send it again |
 | `c` | Copy the request as a curl command, variables filled in |
 | `y` | Copy the request's URL; in Response, the body |
 | `v` | The response, the whole width |
 | `h` | In Response: show or hide the headers |
+| `/` then `n` `N` | In Response: search the response (matches show as you type; a capital letter makes it match case), then go from match to match; `esc` clears it |
+| `d` `D` | In History: compare with the response before it · forget them all |
 | `e` | Pick the environment |
 | `r` | Read the file again |
 | `/` or `:` | The command prompt, with completion |
@@ -103,6 +132,9 @@ the status, how long it took, its size, and the body, JSON indented.
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
 | `/open <file.http>` | Open another file |
+| `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |
+| `/history [clear]` | The responses kept for this file (`clear` forgets them) |
+| `/draft <spec> [what]` | Claude writes requests from an API description, for you to look over and add |
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
@@ -115,7 +147,7 @@ the status, how long it took, its size, and the body, JSON indented.
 ## Settings
 
 `,` or `/settings`. They're kept in `~/.hail/config.json` (`HAIL_HOME` moves it), with the environment
-picked for each file and the files opened lately.
+picked for each file, the files opened lately and the names (never the values) of the secrets saved.
 
 | Setting | |
 | --- | --- |

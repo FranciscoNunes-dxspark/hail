@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 // Read per call so tests can point HAIL_HOME somewhere temporary.
-const configDir = () => process.env.HAIL_HOME || join(homedir(), '.hail');
+export const configDir = () => process.env.HAIL_HOME || join(homedir(), '.hail');
 
 /** Where the settings are kept, to show in /settings. */
 export const configFile = () => join(configDir(), 'config.json');
