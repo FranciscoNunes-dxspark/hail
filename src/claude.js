@@ -1,35 +1,10 @@
 // Claude through the Claude Code CLI (`claude -p`), signed in as you already are, so Hail never sees a
 // key; Splice asks it the same way. The prompts and the reading of answers are pure, for tests; `ask`
-// runs the CLI, and App takes it as the `askClaude` prop so tests stub it.
-import { execFile } from 'node:child_process';
+// (the family's shared claude-cli.js) runs the CLI, and App takes it as the `askClaude` prop so tests
+// stub it.
 import { parseHttpFile } from './http-file.js';
 
-// Each flag takes seconds off a call: no MCP servers to start, no settings files (whose hooks and
-// plugins load on every run), no skills, and nothing saved to your session history.
-const FLAGS = ['--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'];
-
-/** Asks Claude `prompt` about `input` (sent on stdin), in `cwd`, with no tools. */
-export function ask(prompt, { input = '', cwd, signal } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = execFile('claude', ['-p', prompt, '--tools', '', ...FLAGS], { cwd, signal, windowsHide: true, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (!err) return resolve(stdout.trim());
-      if (err.name === 'AbortError') return reject(Object.assign(new Error('Cancelled'), { cancelled: true }));
-      if (err.code === 'ENOENT') return reject(new Error('Claude Code (claude) is not installed or not on the PATH. Get it from https://claude.com/claude-code'));
-      reject(new Error((stderr || err.message).trim().split('\n').slice(-3).join('\n')));
-    });
-    // A program that exits without reading its input closes the pipe first.
-    child.stdin.on('error', () => {});
-    child.stdin.end(input);
-  });
-}
-
-const MAX_INPUT = 200_000;
-
-/** Keeps what's sent to Claude to a sensible size, saying where it was cut. */
-export function clip(text, max = MAX_INPUT) {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n\n[Cut here: the rest (${(text.length - max).toLocaleString('en')} more characters) was left out.]`;
-}
+export { ask, clip } from './claude-cli.js';
 
 /**
  * What to ask for requests drafted from an API description (OpenAPI, Swagger, or any text that

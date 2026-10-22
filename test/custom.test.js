@@ -1,6 +1,7 @@
 // The command palette, your own commands and your own keys, through the real UI.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { parseKey } from '../src/keymap.js';
 import { KEYS, start, tempHome, type, until } from './helpers.js';
 
 let cleanup;
@@ -42,4 +43,10 @@ test('ctrl+p filters every command and runs the one picked; your commands and ke
   } finally {
     app.unmount();
   }
+});
+
+test('key names: "alt++" is alt and the + key', () => {
+  // keymap.js once lost Array's splice here to a renaming of the app's name, and threw.
+  assert.equal(parseKey('alt++').seq, '\x1b+');
+  assert.match(parseKey('ctrl++').error, /ctrl goes with a letter/);
 });

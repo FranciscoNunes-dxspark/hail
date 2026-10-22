@@ -55,7 +55,7 @@ export function parseKey(text) {
   }
   const parts = raw.split('+');
   // "ctrl++" is ctrl and the + key.
-  if (parts.at(-1) === '' && parts.length > 1) parts.hail(-2, 2, '+');
+  if (parts.at(-1) === '' && parts.length > 1) parts.splice(-2, 2, '+');
   const last = parts.pop();
   const mods = new Set(parts.map((p) => p.trim().toLowerCase()));
   for (const m of mods) if (!['ctrl', 'alt', 'shift', 'meta', 'option'].includes(m)) return { error: `"${raw}": ${m} isn't ctrl, alt or shift` };
