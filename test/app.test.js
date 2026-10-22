@@ -183,7 +183,7 @@ test('settings: a toggle saves, the accent changes through its command', async (
     app.stdin.write('k');
     await until(() => /❯ Accent colour/.test(frame()), 'the cursor on the accent');
     app.stdin.write(KEYS.enter);
-    await until(() => frame().includes('/accent #ff875f'), 'the prompt filled in');
+    await until(() => frame().includes('/accent #e8445a'), 'the prompt filled in');
     for (let i = 0; i < 7; i++) app.stdin.write(KEYS.backspace);
     await type(app.stdin, '#5fafff');
     app.stdin.write(KEYS.enter);

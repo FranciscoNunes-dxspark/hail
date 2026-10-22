@@ -1,6 +1,6 @@
 // One palette for the whole UI. The accent can be changed in /settings (it's "accent": "#hex" in the config).
 export const theme = {
-  accent: '#ff875f', // DEFAULT_ACCENT, below
+  accent: '#e8445a', // DEFAULT_ACCENT, below
   border: '#5f5f5f',
   dim: '#8a8a8a',
   selBg: '#303030',
@@ -18,7 +18,7 @@ export const theme = {
 // Windows terminals draw ⏺ as a wide emoji, so use the plain circle there (as Claude Code does).
 export const BULLET = process.platform === 'win32' ? '●' : '⏺';
 
-export const DEFAULT_ACCENT = '#ff875f';
+export const DEFAULT_ACCENT = '#e8445a';
 
 /** Whether `color` is something the accent can be: "#rrggbb". */
 export const isColour = (color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);

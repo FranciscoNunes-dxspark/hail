@@ -8,9 +8,9 @@ export const PET = { name: 'Hoot', kind: 'owl' };
 // accent for the outline, a darker shade for the feathers, a paler one for the breast's markings, the
 // eyes' discs and pupils, and one contrasting colour for the beak and feet.
 export const PALETTE = {
-  G: '#ff875f', // outline and ear tufts, the accent
-  D: '#8c4a34', // feathers
-  L: '#c9785a', // the breast's markings
+  G: '#e8445a', // outline and ear tufts, the accent
+  D: '#7d2632', // feathers
+  L: '#b84b5c', // the breast's markings
   W: '#fff1dc', // the eyes' discs
   E: '#1b100b', // pupils
   O: '#ffd75f', // beak and feet, the one bright colour

@@ -17,9 +17,9 @@ const px = full.map((row) => row.slice(first, last + 1));
 
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
 
-// The badge: "POST" in white on green, a rounded tag, as Trawl's "SQL"; green, well away from the owl's
-// orange and yellow, so it stands apart from the beak and feet. It's drawn at twice the pet's
-// resolution, the coarsest the letters still read at.
+// The badge: "POST" in white on teal, a rounded tag, as Trawl's "SQL"; teal, the owl's red turned
+// round the colour wheel, so it stands apart from the feathers and the yellow beak and feet. It's
+// drawn at twice the pet's resolution, the coarsest the letters still read at.
 const BADGE = [
   '.bbbbbbbbbbbbbbbbb.',
   'bbbbbbbbbbbbbbbbbbb',
@@ -32,7 +32,7 @@ const BADGE = [
   '.bbbbbbbbbbbbbbbbb.',
 ];
 // Letters of their own, so the badge's colours never change the owl's.
-const COLOURS = { ...PALETTE, b: '#2e9e5b', t: '#ffffff' };
+const COLOURS = { ...PALETTE, b: '#13959b', t: '#ffffff' };
 
 // The pet at the badge's resolution: every pixel doubled.
 const px2 = px.flatMap((row) => {
