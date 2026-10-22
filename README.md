@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.svg" width="120" alt="Pip, the Hail owl"></p>
+<p align="center"><img src="assets/logo.svg" width="120" alt="Hoot, the Hail owl"></p>
 
 # Hail
 
@@ -151,7 +151,7 @@ picked for each file, the files opened lately and the names (never the values) o
 
 | Setting | |
 | --- | --- |
-| Accent colour | The colour of the cursor, borders and Pip |
+| Accent colour | The colour of the cursor, borders and Hoot |
 | Mouse | Off leaves selecting text to the terminal |
 | Check for new versions | Once a day, in the downloaded builds |
 | Install them by itself | Off only says a new version is out |

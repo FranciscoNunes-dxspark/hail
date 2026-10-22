@@ -1,8 +1,8 @@
-// Pip, Hail's owl. One pixel drawing feeds the terminal pet, the SVG logo and the app icon. Owls carry
+// Hoot, Hail's owl. One pixel drawing feeds the terminal pet, the SVG logo and the app icon. Owls carry
 // the post, and a request is a letter sent off and answered.
 
 /** Who the pet is; the welcome box, the mood lines and the logo's title all say it from here. */
-export const PET = { name: 'Pip', kind: 'owl' };
+export const PET = { name: 'Hoot', kind: 'owl' };
 
 // The accent's family, as Trawl's Glim, Splice's Twig and Keel's Pinch are coloured from theirs: the
 // accent for the outline, a darker shade for the feathers, a paler one for the breast's markings, the

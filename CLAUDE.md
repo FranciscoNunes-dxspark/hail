@@ -45,7 +45,7 @@ Releases are automatic: every push to main (except Markdown-only ones) runs the 
 - **Updates** (`src/update.js`): once a day, GitHub's releases API, then `gh api` while the repository is private. A newer release is installed in the background next to the executable, checked against `SHA256SUMS.txt`. Release file names must match `TARGETS` in `scripts/build.js`. `cli.jsx` passes `checkUpdate` and `installUpdate` only in compiled builds.
 - **Config** (`src/config.js`): `~/.hail/config.json`, overridable with `HAIL_HOME` (tests use it). Change it only through `ctx.setConfig`: `App` saves its whole copy. A new setting is a row in `src/settings.js` plus the README's Settings section.
 - **Theme and text**: one palette in `src/theme.js`; use `BULLET` instead of `⏺`, and `src/text.js` (`fit`, `wrap`, `stringWidth`) for width-aware truncation, never `.length`.
-- **Pip** (`src/pet.js`, `src/ui/Pet.jsx`): the mascot's pixel art and mood. `assets/` is generated from it by `scripts/logo.js`; don't hand-edit those files.
+- **Hoot** (`src/pet.js`, `src/ui/Pet.jsx`): the mascot's pixel art and mood. `assets/` is generated from it by `scripts/logo.js`; don't hand-edit those files.
 
 ## Tests
 
