@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.svg" width="120" alt="Pip, the Hail puffin"></p>
+<p align="center"><img src="assets/logo.svg" width="120" alt="Pip, the Hail owl"></p>
 
 # Hail
 

@@ -1,12 +1,13 @@
 // Draws the pet into assets/: logo.svg (README, GitHub), logo.png (social preview), logo.ico
 // (the Windows executable's icon), and logo-transparent.svg/.png/.ico (just the pet, no background),
-// all from the pixels in src/pet.js.
+// all from the pixels in src/pet.js, each with a "POST" tag in the bottom-right corner,
+// as Trawl's Glim has its "SQL" tag and Splice's Twig the Git logo.
 //   node scripts/logo.js
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { PALETTE, PET, petPixels } from '../src/pet.js';
 
-const BG = '#24130d';
+const BG = '#17151a';
 // Trim the empty columns kept for the waving paw, so the face sits in the middle.
 const full = petPixels('idle');
 const used = [...full[0]].map((_, x) => full.some((row) => row[x] !== '.'));
@@ -16,26 +17,50 @@ const px = full.map((row) => row.slice(first, last + 1));
 
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
 
-const COLOURS = PALETTE;
+// The badge: "POST" in the pupils' dark on the beak's yellow, a rounded tag, as Trawl's "SQL". It's
+// drawn at twice the pet's resolution, the coarsest the letters still read at.
+const BADGE = [
+  '.YYYYYYYYYYYYYYYYY.',
+  'YYYYYYYYYYYYYYYYYYY',
+  'YYEEEYEEEYEEEYEEEYY',
+  'YYEYEYEYEYEYYYYEYYY',
+  'YYEEEYEYEYEEEYYEYYY',
+  'YYEYYYEYEYYYEYYEYYY',
+  'YYEYYYEEEYEEEYYEYYY',
+  'YYYYYYYYYYYYYYYYYYY',
+  '.YYYYYYYYYYYYYYYYY.',
+];
+const COLOURS = { ...PALETTE, Y: PALETTE.O, E: PALETTE.E };
 
-// The pet at twice its resolution, every pixel doubled, so it can sit centred on an even grid.
+// The pet at the badge's resolution: every pixel doubled.
 const px2 = px.flatMap((row) => {
   const wide = [...row].map((c) => c + c).join('');
   return [wide, wide];
 });
 
-/** The pet at (ox, oy) on a w × h grid of half-pixels: rows of palette letters, '.' for nothing. */
-function grid(w, h, ox, oy) {
-  return Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => px2[y - oy]?.[x - ox] ?? '.').join(''));
+/**
+ * The pet at (ox, oy) on a w × h grid of half-pixels, with the badge's top-left corner at (bx, by),
+ * cut out of the pet by a one-cell gap. Rows of palette letters, '.' for nothing.
+ */
+function grid(w, h, ox, oy, bx, by) {
+  const badge = (x, y) => BADGE[y - by]?.[x - bx] ?? '.';
+  return Array.from({ length: h }, (_, y) =>
+    Array.from({ length: w }, (_, x) => {
+      if (badge(x, y) !== '.') return badge(x, y);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (badge(x + dx, y + dy) !== '.') return '.';
+      return px2[y - oy]?.[x - ox] ?? '.';
+    }).join(''),
+  );
 }
 
-// The dark square: 40 half-pixels across, the pet centred with a margin.
-const centre = (size, n) => Math.floor((size - n) / 2);
-const SQUARE = grid(40, 40, centre(40, px2[0].length), centre(40, px2.length));
+const BW = BADGE[0].length;
+const BH = BADGE.length;
+// The dark square: 40 half-pixels across, the pet up and to the left of the badge.
+const SQUARE = grid(40, 40, 4, 8, 40 - BW - 1, 40 - BH - 2);
 // The transparent icon: 32 across, so the usual icon sizes (16, 32, 48 … 256) keep the pet's pixels whole.
-const ICON = grid(32, 32, centre(32, px2[0].length), centre(32, px2.length));
-// The pet cropped to the drawing.
-const CROPPED = grid(px2[0].length, px2.length, 0, 0);
+const ICON = grid(32, 32, 1, 4, 32 - BW, 32 - BH);
+// The pet cropped to the drawing, with room right and below for the badge to sit on.
+const CROPPED = grid(px2[0].length + 6, px2.length + 6, 0, 0, px2[0].length + 6 - BW, px2.length + 6 - BH);
 
 /** A grid drawn at `scale` image pixels per cell, as RGBA rows; `inside(x, y)` limits it to a shape. */
 function paint(cells, scale, bg = [0, 0, 0, 0], inside = () => true) {

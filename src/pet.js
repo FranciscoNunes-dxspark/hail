@@ -1,43 +1,45 @@
-// Pip, Hail's seabird. One pixel drawing feeds the terminal pet, the SVG logo and the app icon. A
-// puffin, in profile: seabirds carry things back and forth over open water, and so does Hail.
+// Pip, Hail's owl. One pixel drawing feeds the terminal pet, the SVG logo and the app icon. Owls carry
+// the post, and a request is a letter sent off and answered.
 
 /** Who the pet is; the welcome box, the mood lines and the logo's title all say it from here. */
-export const PET = { name: 'Pip', kind: 'puffin' };
+export const PET = { name: 'Pip', kind: 'owl' };
 
 // The accent's family, as Trawl's Glim, Splice's Twig and Keel's Pinch are coloured from theirs: the
-// accent for the outline, a darker shade for the back, a pale face, a near-black eye, and one contrasting colour.
+// accent for the outline, a darker shade for the feathers, a paler one for the breast's markings, the
+// eyes' discs and pupils, and one contrasting colour for the beak and feet.
 export const PALETTE = {
-  G: '#ff875f', // outline, the accent
-  D: '#8c4a34', // back and wing
-  L: '#ffcfbf', // face and breast
-  E: '#1e100b', // eye
-  W: '#ffffff', // eye shine
-  T: '#ffd75f', // the beak, the one bright colour
+  G: '#ff875f', // outline and ear tufts, the accent
+  D: '#8c4a34', // feathers
+  L: '#c9785a', // the breast's markings
+  W: '#fff1dc', // the eyes' discs
+  E: '#1b100b', // pupils
+  O: '#ffd75f', // beak and feet, the one bright colour
 };
 
-// 16 × 10 pixels; '.' is transparent. Facing right, with the beak in columns 11–15.
+// 16 × 10 pixels; '.' is transparent. Face on: ear tufts, two round eyes, the beak between them, a
+// speckled breast and feet. Columns 14–15 are room for a raised wing.
 const BASE = [
-  '....GGGGG.......',
-  '..GGDDDDDGG.....',
-  '.GDDDDDDDDDG....',
-  '.GDLLLLEWDDGTT..',
-  'GDLLLLLEEDDTTTT.',
-  'GDLLLLLLLDDGTT..',
-  'GDLLLLLLLLDDG...',
-  '.GDLLLLLLLDDG...',
-  '..GGDLLLLDGG....',
-  '....GGGGGG......',
+  '.GG........GG...',
+  '.GDGGGGGGGGDG...',
+  'GDDDDDDDDDDDDG..',
+  'GDWWWDDDDWWWDG..',
+  'GDWEWDDDDWEWDG..',
+  'GDWWWDOODWWWDG..',
+  'GDDLDDOODDLDDG..',
+  'GDLDLDDDDLDLDG..',
+  '.GDLDLDDLDLDG...',
+  '..GOOGGGGOOG....',
 ];
 
 // Each mood replaces some rows of the base drawing.
 const MOODS = {
   idle: {},
-  look: { 3: '.GDLLLLWEDDGTT..' }, // glancing the other way, for the busy animation
-  sleep: { 3: '.GDLLLLDDDDGTT..', 4: 'GDLLLLLEEDDTTTT.' },
-  happy: { 3: '.GDLLLLDEDDGTT..', 4: 'GDLLLLLEDEDTTTT.' },
-  worried: { 3: '.GDLLLLWWDDGTT..', 4: 'GDLLLLLEEDDTT...' },
-  // Calling out, beak open: a request has gone and come back.
-  wave: { 3: '.GDLLLLEWDDGTTTT', 4: 'GDLLLLLEEDDG....', 5: 'GDLLLLLLLDDGTTTT' },
+  look: { 4: 'GDEWWDDDDEWWDG..' }, // glancing the other way, for the busy animation
+  sleep: { 3: 'GDDDDDDDDDDDDG..', 4: 'GDEEEDDDDEEEDG..', 5: 'GDDDDDOODDDDDG..' },
+  happy: { 3: 'GDDWDDDDDDWDDG..', 4: 'GDWDWDDDDWDWDG..', 5: 'GDDDDDOODDDDDG..' },
+  worried: { 3: 'GDWEWDDDDWEWDG..', 4: 'GDWWWDDDDWWWDG..' },
+  // A wing up: off it goes with the letter.
+  wave: { 2: 'GDDDDDDDDDDDDG.G', 3: 'GDWWWDDDDWWWDGDG', 4: 'GDWEWDDDDWEWDDG.', 5: 'GDWWWDOODWWWDG..' },
 };
 
 /** The drawing for a mood, as rows of palette letters. */
@@ -68,14 +70,14 @@ export function petRows(mood = 'idle') {
   return rows;
 }
 
-/** A one-line face for the header: ▸ is the beak. */
+/** A one-line owl for the header. */
 export const FACES = {
-  idle: '(•▸)',
-  look: '(•▸)',
-  sleep: '(–▸)',
-  happy: '(^▸)',
-  worried: '(◉▸)',
-  wave: '(•▸)~',
+  idle: '{o,o}',
+  look: '{o,o}',
+  sleep: '{-,-}',
+  happy: '{^,^}',
+  worried: '{O,O}',
+  wave: '{o,o}/',
 };
 
 /** How the pet feels right now: about the last result, and whether something is running. */
