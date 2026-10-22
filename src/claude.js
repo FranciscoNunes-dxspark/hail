@@ -17,6 +17,8 @@ export function ask(prompt, { input = '', cwd, signal } = {}) {
       if (err.code === 'ENOENT') return reject(new Error('Claude Code (claude) is not installed or not on the PATH. Get it from https://claude.com/claude-code'));
       reject(new Error((stderr || err.message).trim().split('\n').slice(-3).join('\n')));
     });
+    // A program that exits without reading its input closes the pipe first.
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 }

@@ -42,6 +42,8 @@ export function run(command, { cwd = process.cwd(), signal, input, env } = {}) {
       if (code === 0) return resolve({ stdout, stderr });
       reject(new RunError(stderr.trim() || stdout.trim() || `${command} exited with ${code}`, { code, stdout, stderr }));
     });
+    // A program that exits without reading its input (one that isn't there, say) closes the pipe first.
+    child.stdin.on('error', () => {});
     child.stdin.end(input ?? '');
   });
 }
