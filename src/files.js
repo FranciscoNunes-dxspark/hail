@@ -5,12 +5,13 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { loadEnvironments } from './environments.js';
 import { parseHttpFile } from './http-file.js';
 
-/** The file at `path`, read: { path, dir, name, requests, variables, environments }. Throws if it can't be read. */
+/** The file at `path`, read: { path, dir, name, text, requests, variables, environments }. Throws if it can't be read. */
 export async function loadHttpFile(path) {
   const full = resolve(path);
-  const { requests, variables } = parseHttpFile(readFileSync(full, 'utf8'));
+  const text = readFileSync(full, 'utf8');
+  const { requests, variables } = parseHttpFile(text);
   const dir = dirname(full);
-  return { path: full, dir, name: basename(full), requests, variables, environments: loadEnvironments(dir) };
+  return { path: full, dir, name: basename(full), text, requests, variables, environments: loadEnvironments(dir) };
 }
 
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'bin', 'obj']);

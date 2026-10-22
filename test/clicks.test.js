@@ -62,12 +62,30 @@ test('clicks pick rows and tabs, the wheel scrolls the list, and a copy is said'
     mouse.wheel(p.x, p.y, 3);
     await until(() => !frame().includes('Request 1 '), 'the list scrolled by the wheel');
 
-    p = at(frame(), '4 Log');
+    p = at(frame(), '5 Log');
     mouse.click(p.x, p.y);
     await until(() => frame().includes('Nothing has run yet'), 'the Log tab');
 
     mouse.copy('two\nlines');
     await until(() => frame().includes('Copied 2 lines'), 'the copy said');
+  } finally {
+    app.unmount();
+  }
+});
+
+test('in the Edit view a click puts the cursor on the character under it and starts typing', async () => {
+  const mouse = fakeMouse();
+  const app = start({ initialFile: join(dir, 'api.http'), mouse });
+  const frame = () => app.lastFrame() ?? '';
+  try {
+    await until(() => frame().includes('Request 1'), 'the requests');
+    app.stdin.write('2');
+    await until(() => frame().includes('GET https://example.com/1'), 'the Edit view');
+    const p = at(frame(), 'example.com/1');
+    mouse.click(p.x + 'example'.length, p.y);
+    await until(() => frame().includes('typing: every key is text'), 'typing');
+    app.stdin.write('-');
+    await until(() => frame().includes('GET https://example-.com/1'), 'typed where it was clicked');
   } finally {
     app.unmount();
   }

@@ -88,6 +88,96 @@ export function parseHttpFile(text) {
   return { variables, requests };
 }
 
+// {{placeholders}} inside a run of text, as runs of their own.
+function withPlaceholders(text, kind) {
+  const out = [];
+  let at = 0;
+  for (const m of text.matchAll(/\{\{.*?\}\}/g)) {
+    if (m.index > at) out.push({ text: text.slice(at, m.index), kind });
+    out.push({ text: m[0], kind: 'placeholder' });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) out.push({ text: text.slice(at), kind });
+  return out;
+}
+
+/**
+ * The text as lines of runs ({ text, kind }) for the editor to colour, read as parseHttpFile reads
+ * it: separator, comment, variable (an @name), method, url, version, header, value, body, file (a
+ * body from a file), handler (a response handler, left out) and placeholder ({{...}}). Plain text
+ * has no kind.
+ */
+export function highlight(text) {
+  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  // Where in its request each line is: before the request line, the query lines, headers, body.
+  let state = 'pre';
+  const runs = lines.map((l) => {
+    if (SEPARATOR.test(l)) {
+      state = 'pre';
+      return [{ text: l, kind: 'separator' }];
+    }
+    if (state === 'handler') return [{ text: l, kind: 'handler' }];
+    if (state === 'body' && (/^\s*>\s*(\{%|\S)/.test(l) || /^\s*<>/.test(l))) {
+      state = 'handler';
+      return [{ text: l, kind: 'handler' }];
+    }
+    if (state === 'body') return /^\s*<@?\s+\S/.test(l) ? [{ text: l, kind: 'file' }] : withPlaceholders(l, undefined);
+    if (state === 'query' && !/^\s*[?&]/.test(l)) state = 'headers';
+    if (COMMENT.test(l)) return [{ text: l, kind: 'comment' }];
+    if (state === 'pre') {
+      const variable = /^(\s*@)([A-Za-z_][\w.-]*)(\s*=\s*)(.*)$/.exec(l);
+      if (variable) return [{ text: variable[1] + variable[2], kind: 'variable' }, { text: variable[3], kind: 'comment' }, ...withPlaceholders(variable[4], undefined)];
+      const m = l.trim() ? REQUEST_LINE.exec(l) : null;
+      if (!m) return withPlaceholders(l, undefined);
+      state = 'query';
+      const runs = [];
+      const method = /^(\s*)([A-Za-z]+)(\s+)/.exec(l);
+      let rest = l;
+      if (m[1] && method) {
+        runs.push({ text: method[1] }, { text: method[2], kind: 'method' }, { text: method[3] });
+        rest = l.slice(method[0].length);
+      }
+      const version = /(\s+HTTP\/[\d.]+\s*)$/i.exec(rest);
+      if (version) rest = rest.slice(0, version.index);
+      runs.push(...withPlaceholders(rest, 'url'));
+      if (version) runs.push({ text: version[1], kind: 'version' });
+      return runs;
+    }
+    if (state === 'query') return withPlaceholders(l, 'url');
+    if (!l.trim()) {
+      state = 'body';
+      return [{ text: l }];
+    }
+    const h = /^(\s*[^:\s][^:]*?)(\s*:\s*)(.*)$/.exec(l);
+    return h ? [...withPlaceholders(h[1], 'header'), { text: h[2] }, ...withPlaceholders(h[3], 'value')] : withPlaceholders(l, undefined);
+  });
+  return runs.map((line) => line.filter((r) => r.text));
+}
+
+/** The lines (from 0) of the request block row `row` is in: from its ### line, or the top, to the line before the next. */
+export function blockAt(lines, row) {
+  let start = row;
+  while (start > 0 && !SEPARATOR.test(lines[start])) start--;
+  let end = row + 1;
+  while (end < lines.length && !SEPARATOR.test(lines[end])) end++;
+  return { start, end: end - 1 };
+}
+
+/**
+ * What line `row` (from 0) is to its request, from the lines above it: 'pre' before the request
+ * line (so it may be the request line), 'headers' after it up to the first blank line, then 'body'.
+ */
+export function roleAt(lines, row) {
+  const { start } = blockAt(lines, row);
+  let state = 'pre';
+  for (let i = SEPARATOR.test(lines[start]) ? start + 1 : start; i < row; i++) {
+    const l = lines[i];
+    if (state === 'pre' && l.trim() && !COMMENT.test(l) && !FILE_VARIABLE.test(l) && REQUEST_LINE.test(l)) state = 'headers';
+    else if (state === 'headers' && !l.trim()) state = 'body';
+  }
+  return state;
+}
+
 /** The request under line `line` (from 1) of the file: the last one starting at or above it. */
 export function requestAtLine(requests, line) {
   return requests.filter((r) => r.line <= line).at(-1) ?? requests[0] ?? null;

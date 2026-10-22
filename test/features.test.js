@@ -74,7 +74,7 @@ test('a secret asked for once and kept in the store, history across runs, and co
   frame = () => app.lastFrame() ?? '';
   try {
     await until(() => frame().includes('"call": 2') && /GET\s+200 items/.test(frame()), 'the response from last time');
-    app.stdin.write('3');
+    app.stdin.write('4');
     await until(() => frame().includes('2 kept'), 'History');
     assert.match(frame(), /❯ now\s+200 GET\s+items/);
     app.stdin.write('d');
@@ -98,7 +98,7 @@ test('searching a response: matches as you type, n to the next, esc clears it, a
     await until(() => /GET\s+(\d+ )?items/.test(frame()), 'the request');
     app.stdin.write(KEYS.enter);
     await until(() => frame().includes('"bowsprit"'), 'the response');
-    app.stdin.write('2');
+    app.stdin.write('3');
     await until(() => frame().includes('/ search'), 'the Response view');
     app.stdin.write('/');
     await type(app.stdin, 'bow');

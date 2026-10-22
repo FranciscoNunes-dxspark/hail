@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdin } from 'ink';
-import { watch } from 'node:fs';
+import { readFileSync, watch, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import * as a from '../actions.js';
 import { azToken as azCli } from '../azure.js';
 import { osCredentials } from '../credentials.js';
 import { appendHistory, clearHistory, entryFor, historyFile, latestByLabel, readHistory } from '../history.js';
 import { COMMANDS, findCommand, suggestionsFor } from '../commands.js';
+import * as ed from '../editor.js';
+import { parseHttpFile } from '../http-file.js';
 import { saveConfig } from '../config.js';
 import { HELP } from '../help.js';
 import { commandsSection, sectionFor } from '../help-layout.js';
@@ -26,12 +28,14 @@ import { LogView } from './LogView.jsx';
 import { Picker } from './Picker.jsx';
 import { RequestsView } from './RequestsView.jsx';
 import { ResponseView } from './ResponseView.jsx';
+import { EditView } from './EditView.jsx';
 import { TextViewer } from './TextViewer.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
 import { FACES, moodFor } from '../pet.js';
 
 const VIEWS = [
   { id: 'requests', label: 'Requests' },
+  { id: 'edit', label: 'Edit' },
   { id: 'response', label: 'Response' },
   { id: 'history', label: 'History' },
   { id: 'log', label: 'Log' },
@@ -47,13 +51,19 @@ const CTRL_P = '\x10';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
-  requests: '↵ send · c copy as curl · y copy the URL · v the response, full view · e environment',
+  requests: '↵ send · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
+  edit: '↵ or i type · ctrl+r send · ctrl+s save · ctrl+z undo · ctrl+f find · [ ] requests · c copy as curl',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
   history: '↵ show it · d compare with the one before · D forget them all',
   log: '↵ all its output · y copy it',
 };
 
 const firstLine = (s) => String(s ?? '').split('\n')[0];
+// "3 lines" or "12 characters", for what was copied.
+const copiedText = (text) => {
+  const n = text.split('\n').length;
+  return n > 1 ? `${n} lines` : `${text.length} character${text.length === 1 ? '' : 's'}`;
+};
 
 function Header({ data, env, width, loading, mood }) {
   const segs = [
@@ -184,6 +194,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const confirmRef = useRef(null);
   const nextId = useRef(1);
   const historyPos = useRef(-1);
+  // What /find (ctrl+f in the Edit view) looked for last, for n and N.
+  const lastFind = useRef('');
   const lastOutput = useRef(null);
   // Counts keypresses, ahead of every handler, so the dispatcher can tell the key that opened the prompt.
   const keySeq = useRef(0);
@@ -242,13 +254,91 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     addEntry({ title, status, lines });
   };
 
+  // The file as the Edit view has it: the text being edited, its undo steps, and what's on disk (the
+  // text last read or written, and its line endings). Typing is saved a moment after it stops, and a
+  // change made to the file elsewhere comes in when nothing typed is waiting to be saved.
+  const [editor, setEditorState] = useState(() => ed.fromText(''));
+  const editorRef = useRef(editor);
+  const undoRef = useRef(ed.newHistory());
+  const diskRef = useRef({ path: null, text: '', eol: '\n' });
+  const saveTimer = useRef(null);
+  const unsaved = () => Boolean(diskRef.current.path) && ed.toText(editorRef.current) !== diskRef.current.text;
+  // Writes what's typed now, rather than when typing stops. False when it couldn't.
+  const saveEditor = () => {
+    clearTimeout(saveTimer.current);
+    if (!unsaved()) return true;
+    const disk = diskRef.current;
+    const text = ed.toText(editorRef.current);
+    try {
+      writeFileSync(disk.path, disk.eol === '\n' ? text : text.replaceAll('\n', disk.eol));
+      diskRef.current = { ...disk, text };
+      return true;
+    } catch (e) {
+      note(`Couldn't save ${basename(disk.path)}: ${firstLine(e.message)}`, 'error');
+      return false;
+    }
+  };
+  // Every change to the text is a step ctrl+z can undo; `merge` (typing) joins the keystrokes of a
+  // word into one. The requests are read from the text straight away, so ctrl+r sends what's on screen.
+  const setEditor = (next, { merge = false, record = true } = {}) => {
+    const prev = editorRef.current;
+    const changed = next.lines !== prev.lines && ed.toText(next) !== ed.toText(prev);
+    if (record && changed) undoRef.current = ed.record(undoRef.current, prev, { merge });
+    editorRef.current = next;
+    setEditorState(next);
+    if (!changed || !dataRef.current) return;
+    dataRef.current = { ...dataRef.current, ...parseHttpFile(ed.toText(next)) };
+    setData(dataRef.current);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(saveEditor, 400);
+  };
+  const stepEditor = (step, nothing) => {
+    const r = step(undoRef.current, editorRef.current);
+    if (!r) return note(nothing);
+    undoRef.current = r.history;
+    setEditor(r.editor, { record: false });
+  };
+  // A file just read (`first`: opened) and the editor brought together: a new file's text goes into
+  // it; then a change made elsewhere does, unless typing is waiting to be saved, whose requests count.
+  const withEditor = (d, first) => {
+    let raw = d.text;
+    try {
+      raw ??= readFileSync(d.path, 'utf8');
+    } catch {
+      raw = null;
+    }
+    const text = raw?.replace(/\r\n?/g, '\n') ?? '';
+    if (first) {
+      clearTimeout(saveTimer.current);
+      // A file that can't be read is never written over.
+      diskRef.current = { path: raw == null ? null : d.path, text, eol: /\r\n/.test(raw ?? '') ? '\r\n' : '\n' };
+      undoRef.current = ed.newHistory();
+      editorRef.current = ed.fromText(text);
+      setEditorState(editorRef.current);
+      return d;
+    }
+    if (unsaved()) return { ...d, ...parseHttpFile(ed.toText(editorRef.current)) };
+    if (raw == null || text === diskRef.current.text) return d;
+    diskRef.current = { ...diskRef.current, text };
+    const prev = editorRef.current;
+    const lines = ed.fromText(text).lines;
+    const row = Math.min(prev.row, lines.length - 1);
+    undoRef.current = ed.record(undoRef.current, prev);
+    editorRef.current = { lines, row, col: Math.min(prev.col, lines[row].length) };
+    setEditorState(editorRef.current);
+    return d;
+  };
+  // What's typed is saved when Hail closes too.
+  useEffect(() => () => saveEditor(), []);
+
   const reload = async () => {
     const file = fileRef.current;
     if (!file) return setLoading(false);
     try {
-      const d = await load(file);
+      const loaded = await load(file);
       if (fileRef.current !== file) return;
-      const first = dataRef.current?.path !== d.path;
+      const first = dataRef.current?.path !== loaded.path;
+      const d = withEditor(loaded, first);
       dataRef.current = d;
       setData(d);
       // Opened: what came back last time, so the responses and their variables carry on.
@@ -268,6 +358,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   };
 
   const openFile = async (file) => {
+    saveEditor();
     fileRef.current = file;
     dataRef.current = null;
     setData(null);
@@ -339,7 +430,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   };
 
   const ctxRef = useRef(null);
-  if (!ctxRef.current) ctxRef.current = { get data() { return dataRef.current; }, get config() { return configRef.current; }, mouseHandlers: [] };
+  if (!ctxRef.current) ctxRef.current = { get data() { return dataRef.current; }, get config() { return configRef.current; }, get editor() { return editorRef.current; }, mouseHandlers: [] };
   const ctx = ctxRef.current;
   Object.assign(ctx, {
     task,
@@ -433,6 +524,36 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       if (!copy) return note("Copying to the clipboard isn't available here.", 'error');
       copy(text);
       setFlash({ text: `Copied ${what}` });
+    },
+    // The Edit view's text: changed (setEditor), saved now rather than when typing stops, and undone.
+    setEditor,
+    saveEditor: () => {
+      if (!diskRef.current.path) return note("There's no file to save to.", 'error');
+      if (saveEditor()) setFlash({ text: `Saved ${basename(diskRef.current.path)}` });
+    },
+    undoEdit: () => stepEditor(ed.undo, 'Nothing to undo.'),
+    redoEdit: () => stepEditor(ed.redo, 'Nothing to redo.'),
+    // Typing in the Edit view is a focus of its own. Stopping waits until this key has been handled
+    // everywhere, so the esc (or ctrl+c) that ends typing isn't also taken as a global key.
+    setEditing: (on) => (on ? setFocus('editor') : queueMicrotask(() => focusRef.current === 'editor' && setFocus('view'))),
+    editorHasKeys: () => focusRef.current === 'editor' && !overlayRef.current && !confirmRef.current,
+    // Text selected with the mouse in the Edit view, or cut with ctrl+x: copied, and said for a moment.
+    copySelection: (text, verb = 'Copied') => {
+      if (!copy) return note("Copying to the clipboard isn't available here.", 'error');
+      copy(text);
+      setFlash({ text: `${verb} ${copiedText(text)}` });
+    },
+    // /find and ctrl+f: the next place the text is in the file, selected (with `back`, the one before);
+    // no text finds the last one again, as n and N do.
+    findInEditor: (query, { back = false } = {}) => {
+      if (!dataRef.current) return note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+      const q = query || lastFind.current;
+      if (!q) return note('Nothing to find yet: ctrl+f (or /find <text>) asks for it.');
+      lastFind.current = q;
+      const found = ed.find(editorRef.current, q, { back });
+      if (!found) return note(`"${q}" isn't in ${dataRef.current.name}.`, 'error');
+      setEditor(found);
+      setView('edit');
     },
     // Views call this first in their key handlers, for the same reason as the dispatcher below.
     viewHasKeys: () => focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && answerKey.current !== keySeq.current,
@@ -711,11 +832,18 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // Ink calls the handlers for a key in no fixed order. When a view's ran first and opened the prompt,
     // this same key mustn't then be typed into it.
     if (focusRef.current === 'prompt' && !confirmRef.current) return prefillKey.current === keySeq.current ? undefined : promptKeys(input, key);
+    // While typing in the Edit view, every key is the editor's: the digits, q, ctrl+c too.
+    if (focusRef.current === 'editor') return;
     if (key.ctrl && input === 'c') return exit();
     if (confirmRef.current || overlayRef.current || answerKey.current === keySeq.current) return;
     if (ctx.claimsKey?.(input, key)) return;
     globalKeys(input, key);
   });
+
+  // Typing stops when the Edit view goes off screen.
+  useEffect(() => {
+    if (view !== 'edit' && focusRef.current === 'editor') setFocus('view');
+  }, [view]);
 
   // The terminal reports the mouse while the setting is on (it is unless set off).
   useEffect(() => {
@@ -731,10 +859,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     return target && { target, y: y - target.top };
   };
   const onMouse = (e) => {
-    if (e.type === 'copy') {
-      const n = e.text.split('\n').length;
-      return setFlash({ text: n > 1 ? `Copied ${n} lines` : `Copied ${e.text.length} character${e.text.length === 1 ? '' : 's'}` });
-    }
+    if (e.type === 'copy') return setFlash({ text: `Copied ${copiedText(e.text)}` });
     if (e.button === 'left' && !e.release && !e.drag) {
       const prev = lastPress.current;
       const now = Date.now();
@@ -844,6 +969,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     );
   } else if (view === 'history') {
     main = <HistoryView entries={history} data={data} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+  } else if (view === 'edit') {
+    main = <EditView data={data} responses={responses} editor={editor} editing={focus === 'editor'} ctx={ctx} width={W} height={mainH} active={(viewActive || focus === 'editor') && !overlay && !confirmReq} />;
   } else if (view === 'response') {
     const request = ctx.selectedRequest();
     main = <ResponseView request={request} sent={request ? responses[request.label] : null} ctx={ctx} width={W} height={mainH} active={viewActive} />;
@@ -855,6 +982,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     ? flash.text
     : focus === 'prompt'
       ? 'enter run · tab complete · ↑↓ pick or history · esc back'
+      : focus === 'editor'
+        ? 'typing: every key is text · ctrl+r send · ctrl+s save · ctrl+z undo · alt+↑↓ move the line · ctrl+/ comment · esc stop'
       : overlay?.kind === 'help'
         ? 'j/k section · space scroll · / search · esc close'
         : overlay?.kind === 'palette'
@@ -864,7 +993,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
           : overlay
             ? 'j/k scroll · space page · y copy · esc close'
             : HINTS[view];
-  const right = focus === 'prompt' ? '' : '  / commands · ! shell · , settings · ? help';
+  const right = focus === 'prompt' || focus === 'editor' ? '' : '  / commands · ! shell · , settings · ? help';
 
   return (
     <Box flexDirection="column" width={W} height={H}>
