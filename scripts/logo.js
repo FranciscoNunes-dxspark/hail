@@ -57,12 +57,23 @@ function grid(w, h, ox, oy, bx, by) {
 
 const BW = BADGE[0].length;
 const BH = BADGE.length;
-// The dark square: 40 half-pixels across, the pet up and to the left of the badge.
-const SQUARE = grid(40, 40, 4, 8, 40 - BW - 1, 40 - BH - 2);
+// The pet and its badge as one drawing, laid out as in all the family's logos: the badge's
+// bottom-right corner PAD half-pixels right of and below the pet's, so the badges sit alike.
+const PAD = 4;
+const GW = px2[0].length + PAD;
+const GH = px2.length + PAD;
+/** The pet and badge centred on a size × size square; wider than the square, the badge keeps to its edge. */
+function square(size) {
+  const ox = Math.max(0, Math.floor((size - GW) / 2));
+  const oy = Math.max(0, Math.floor((size - GH) / 2));
+  return grid(size, size, ox, oy, Math.min(ox + GW, size) - BW, Math.min(oy + GH, size) - BH);
+}
+// The dark square: 40 half-pixels across.
+const SQUARE = square(40);
 // The transparent icon: 32 across, so the usual icon sizes (16, 32, 48 … 256) keep the pet's pixels whole.
-const ICON = grid(32, 32, 1, 4, 32 - BW, 32 - BH);
+const ICON = square(32);
 // The pet cropped to the drawing, with room right and below for the badge to sit on.
-const CROPPED = grid(px2[0].length + 6, px2.length + 6, 0, 0, px2[0].length + 6 - BW, px2.length + 6 - BH);
+const CROPPED = grid(GW, GH, 0, 0, GW - BW, GH - BH);
 
 /** A grid drawn at `scale` image pixels per cell, as RGBA rows; `inside(x, y)` limits it to a shape. */
 function paint(cells, scale, bg = [0, 0, 0, 0], inside = () => true) {
