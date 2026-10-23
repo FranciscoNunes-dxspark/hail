@@ -9,9 +9,12 @@ import { changedOnly, lineDiff } from './diff.js';
 import { writeExample } from './files.js';
 import { previousOf } from './history.js';
 import { run } from './run.js';
-import { formatSize, prepare, prettyBody, send as sendRequest, toCurl } from './send.js';
+import { checkSummary } from './checks.js';
+import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
+import { formatSize, prepare, prettyBody, toCurl } from './send.js';
 import { settingRows, settingSegments } from './settings.js';
 import { DEFAULT_ACCENT, isColour, setAccent, theme } from './theme.js';
+import { checkLines, statusColour } from './ui/response.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -34,43 +37,117 @@ function requestNamed(ctx, name) {
 }
 
 /**
- * The request with its variables filled in, or null (and why) when some have no value. A secret
- * that isn't saved yet ({{$secret name}}) is asked for, saved, and the request filled in again.
+ * The request with its variables filled in, or null when a secret it needs was asked for and not
+ * given. A secret that isn't saved yet ({{$secret name}}) is asked for, saved, and the request filled
+ * in again. `missing` on what it returns lists the variables nothing gave a value.
  */
-async function prepared(ctx, request) {
+async function fillRequest(ctx, request) {
   let req = await prepare(request, ctx.scope(), { dir: ctx.data.dir });
   const unsaved = req.missing.map((m) => /^\$secret\s+(\S+)$/.exec(m)?.[1]).filter(Boolean);
   if (unsaved.length) {
     for (const name of unsaved) if (!(await askForSecret(ctx, name))) return null;
     req = await prepare(request, ctx.scope(), { dir: ctx.data.dir });
   }
-  if (!req.missing.length) return req;
+  return req;
+}
+
+/** Why a request with variables nothing answers isn't sent, in words. */
+function missingText(ctx, missing) {
   const env = ctx.environment();
-  ctx.note(
-    `Nothing gives ${req.missing.map((m) => `{{${m}}}`).join(', ')} a value\n${env ? `The environment is ${env}; e picks another.` : 'Pick an environment with e, or set it with @name = value in the file.'}`,
-    'error',
-  );
+  return `Nothing gives ${missing.map((m) => `{{${m}}}`).join(', ')} a value\n${env ? `The environment is ${env}; e picks another.` : 'Pick an environment with e, or set it with @name = value in the file.'}`;
+}
+
+/** The request with its variables filled in, or null (and why) when some have no value. */
+async function prepared(ctx, request) {
+  const req = await fillRequest(ctx, request);
+  if (!req) return null;
+  if (!req.missing.length) return req;
+  ctx.note(missingText(ctx, req.missing), 'error');
   return null;
 }
 
-/** ↵ in Requests, and /send: sends it, and shows what came back. */
+/** Sends a filled-in request with what the session holds for it, and keeps what came back. */
+async function exchangeFor(ctx, request, req, signal) {
+  const out = await exchange(req, { signal, globals: ctx.globals() });
+  ctx.setGlobals(out.globals);
+  ctx.setResponse(request, req, out.response, { checks: out.checks });
+  return out;
+}
+
+/** What a response says in the activity lines: its status, time and size, and how its tests went. */
+function responseSummary({ response: res, checks }) {
+  const summary = checkSummary(checks);
+  const failed = (checks?.tests ?? []).filter((t) => !t.passed).map((t) => `✗ ${t.name}`);
+  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...failed, ...(checks?.error ? [checks.error] : [])].join('\n');
+}
+
+/** ↵ in Requests, and /send: sends it, and shows what came back. `/send all` sends every one. */
 export async function send(ctx, which) {
   if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  if (typeof which === 'string' && which.trim().toLowerCase() === 'all' && !ctx.data.requests.some((r) => r.name?.toLowerCase() === 'all')) return sendAll(ctx);
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note(which ? `There's no request called ${which}.` : 'The file has no requests yet.', 'error');
   const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
   if (!req) return;
   // The secrets in it stay out of the activity lines.
   const shown = req.secrets.reduce((t, v) => t.split(v).join('••••••'), req.url);
-  return ctx.task(
-    `${req.method} ${shown}`,
+  return ctx.task(`${req.method} ${shown}`, async (signal) => ({ stdout: responseSummary(await exchangeFor(ctx, request, req, signal)) }), { label: 'Sending' });
+}
+
+/**
+ * A and /send all: every request in the file, top to bottom, each with the variables the ones before
+ * it left (their responses, the globals their handlers set). A request with a variable nothing answers
+ * is passed over; one that gets no answer stops the run; failed tests don't. The report shows after.
+ */
+export async function sendAll(ctx) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const requests = ctx.data.requests;
+  if (!requests.length) return ctx.note('The file has no requests yet.', 'error');
+  const results = [];
+  let stopped = false;
+  const done = await ctx.task(
+    `Send all ${requests.length} request${requests.length === 1 ? '' : 's'} in ${ctx.data.name}`,
     async (signal) => {
-      const res = await sendRequest(req, { signal });
-      ctx.setResponse(request, req, res);
-      return { stdout: `${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}` };
+      for (const request of requests) {
+        if (signal.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+        let req;
+        try {
+          req = await fillRequest(ctx, request);
+        } catch (e) {
+          results.push({ request, skipped: e.message });
+          continue;
+        }
+        if (!req) {
+          results.push({ request, skipped: 'a secret it needs wasn\'t given' });
+          continue;
+        }
+        if (req.missing.length) {
+          results.push({ request, skipped: `nothing gives ${req.missing.map((m) => `{{${m}}}`).join(', ')} a value` });
+          continue;
+        }
+        try {
+          results.push({ request, ...(await exchangeFor(ctx, request, req, signal)) });
+        } catch (e) {
+          if (e.cancelled) throw e;
+          results.push({ request, error: e.message });
+          stopped = true;
+          break;
+        }
+      }
+      const text = summaryLine(results, { stopped });
+      if (runFailed(results)) throw new Error(text);
+      return { stdout: text };
     },
-    { label: 'Sending' },
+    { label: 'Sending all' },
   );
+  if (!results.length) return;
+  const cancelled = done.error?.cancelled;
+  const left = requests.slice(results.length);
+  const lines = reportLines(results, { left, stopped: stopped || cancelled });
+  const tones = { add: theme.add, del: theme.del, dim: theme.dim, warn: theme.warn };
+  ctx.showText(`Sent all: ${ctx.data.name}${ctx.environment() ? ` · ${ctx.environment()}` : ''}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), {
+    lines: lines.map((segs) => segs.map(({ text, tone, status, bold }) => ({ text, bold, color: status ? statusColour(status) : tones[tone] }))),
+  });
 }
 
 /** c in Requests, and /curl: the request, filled in, as a curl command on the clipboard. */
@@ -139,6 +216,7 @@ export function entryLines(entry) {
     ...(q.body ? [[], ...q.body.split('\n').map((l) => [{ text: l }])] : []),
     [],
     [{ text: `${r.status} ${r.statusText}`, bold: true, color: r.status < 400 ? theme.add : theme.del }, { text: `  ${r.ms} ms · ${formatSize(r.size)} · ${new Date(entry.at).toLocaleString()}`, color: theme.dim }],
+    ...checkLines(entry.checks),
     ...r.headers.map(([k, v]) => [{ text: `${k}: `, color: theme.dim }, { text: v }]),
     [],
     ...prettyBody(r).split('\n').map((l) => [{ text: l }]),

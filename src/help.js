@@ -33,6 +33,7 @@ export const HELP = [
     views: ['requests'],
     rows: [
       ['↵', 'Send it'],
+      ['A', 'Send them all, top to bottom (/send all), and show a report: each one\'s status, time and tests'],
       ['c', 'Copy it as a curl command, variables filled in'],
       ['y', 'Copy its URL'],
       ['i', 'Edit the file, typing, on this request'],
@@ -92,6 +93,18 @@ export const HELP = [
       ['{{$uuid}} {{$timestamp}}', 'Built-ins; also $isoTimestamp, $randomInt min max, $processEnv NAME, $env.NAME'],
       ['{{$azToken resource}}', "A token from the Azure CLI's sign-in (az login)"],
       ['{{$secret name}}', "A secret kept in the system's credential store, asked for the first time it's used (/secret saves or replaces one)"],
+    ],
+  },
+  {
+    title: 'Response checks',
+    about: "JetBrains' response handlers, after a request's body; run in a sandbox when the response comes",
+    rows: [
+      ['> {% … %}', 'A script (over as many lines as it takes); > ./checks.js runs one from a file'],
+      ['client.test(name, fn)', 'A test: passes unless fn throws; client.assert(cond, message) throws when cond is false'],
+      ['client.global.set(n, v)', 'A variable {{n}} for the requests after it (over the environment\'s); client.global.get(n) reads it'],
+      ['client.log(…)', 'A line under the response'],
+      ['response', '.status · .body (parsed when JSON) · .headers.valueOf(name) · .contentType.mimeType'],
+      ['hail test api.http', 'From the shell: send them all, print the report, exit 1 if anything failed (--env picks the environment)'],
     ],
   },
   {

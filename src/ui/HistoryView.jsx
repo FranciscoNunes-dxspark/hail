@@ -8,6 +8,14 @@ import { useListNav, useMouse } from './hooks.js';
 import { Panel, Row } from './parts.jsx';
 import { methodColour, statusColour } from './response.js';
 
+// How its tests went, when it had any: "  ✓ 3" or "  ✗ 1/3".
+function testsSegment(checks) {
+  const tests = checks?.tests ?? [];
+  const failed = tests.filter((t) => !t.passed).length + (checks?.error ? 1 : 0);
+  if (!tests.length && !failed) return [];
+  return [{ text: failed ? `  ✗ ${failed}/${tests.length}` : `  ✓ ${tests.length}`, color: failed ? theme.del : theme.add }];
+}
+
 /** The responses kept for the open file, newest first. */
 export function HistoryView({ entries, data, ctx, width, height, active }) {
   const list = [...entries].reverse();
@@ -46,6 +54,7 @@ export function HistoryView({ entries, data, ctx, width, height, active }) {
             { text: fit(e.request.method, 7), color: methodColour(e.request.method) },
             { text: fit(e.label, labelW), strong: true },
             { text: `  ${e.response.ms} ms · ${formatSize(e.response.size)}`, color: theme.dim },
+            ...testsSegment(e.checks),
             { text: `  ${e.request.url}`, color: theme.dim },
           ]}
         />

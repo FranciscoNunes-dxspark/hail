@@ -9,23 +9,37 @@
 //   { "user": "{{user}}" }                   the body, up to the next ###
 //
 // A body can come from a file instead: `< ./body.json` as it is, `<@ ./body.json` with its variables
-// filled in. JetBrains' response handlers (`> {% ... %}`) and response files (`<> ...`) are left out.
+// filled in. After the body, JetBrains' response handlers: `> {% ... %}` (a script, which may run over
+// several lines) or `> ./checks.js`, run on what comes back (checks.js). `<> ...` (an earlier response
+// file) is left out. Comments like `# @no-redirect` before the request line or among the headers are
+// directives, kept in `options`.
 
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT'];
 
 const SEPARATOR = /^###/;
 const COMMENT = /^\s*(#|\/\/)/;
-const NAME = /^\s*(?:#|\/\/)\s*@name\s+(\S+)/;
+const NAME = /^\s*(?:#|\/\/)\s*@name(?:\s*=\s*|\s+)(\S+)/;
+// `# @no-redirect`, `# @timeout 30`: what JetBrains calls directives, with or without a value.
+const DIRECTIVE = /^\s*(?:#|\/\/)\s*@([a-z][\w-]*)(?:\s*=?\s*(.*?))?\s*$/i;
+// A response handler after the body: a script between {% and %}, or a file of one.
+const HANDLER = /^\s*>\s*(\{%|\S)/;
 const FILE_VARIABLE = /^\s*@([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$/;
 // The URL may hold spaces inside {{...}} ({{$randomInt 1 10}}). Without a method, a line only counts
 // as a request when it starts like a URL, so stray text above a request isn't taken for one.
 const REQUEST_LINE = new RegExp(`^\\s*(?:(?:(${METHODS.join('|')})\\s+(.+?))|((?:https?:\\/\\/|\\{\\{|\\/).*?))(?:\\s+HTTP\\/[\\d.]+)?\\s*$`, 'i');
 const HEADER = /^\s*([^:\s][^:]*?)\s*:\s*(.*?)\s*$/;
 
+/** The directives in comment line `l` into `options` (lower-case names; a bare one is true). */
+function directive(l, options) {
+  const d = DIRECTIVE.exec(l);
+  if (d && d[1].toLowerCase() !== 'name') options[d[1].toLowerCase()] = d[2] ? d[2] : true;
+}
+
 /**
  * The file's variables and requests: { variables: { name: value }, requests: [{ index, name, label,
- * method, url, headers: [[name, value]], body, bodyFile: { path, fill }, line }] }. `line` is where the
- * request line is (from 1); `label` is what a list shows: the name, else the method and URL.
+ * method, url, headers: [[name, value]], body, bodyFile: { path, fill }, handlers: [{ script | file,
+ * line }], options, line }] }. `line` is where the request line is (from 1); `label` is what a list
+ * shows: the name, else the method and URL. `options` holds the directives (`{ 'no-redirect': true }`).
  */
 export function parseHttpFile(text) {
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
@@ -40,12 +54,14 @@ export function parseHttpFile(text) {
     const end = b + 1 < blocks.length ? blocks[b + 1].start - 1 : lines.length;
     let name = block.title || null;
     let i = block.start;
+    const options = {};
     // Before the request line: comments (one may name it), blank lines and file variables.
     let request = null;
     for (; i < end; i++) {
       const l = lines[i];
       const named = NAME.exec(l);
       if (named) name = named[1];
+      else if (COMMENT.test(l)) directive(l, options);
       if (!l.trim() || COMMENT.test(l)) continue;
       const variable = FILE_VARIABLE.exec(l);
       if (variable) {
@@ -63,15 +79,33 @@ export function parseHttpFile(text) {
     for (; i < end && /^\s*[?&]/.test(lines[i]); i++) request.url += lines[i].trim();
     const headers = [];
     for (; i < end && lines[i].trim(); i++) {
-      if (COMMENT.test(lines[i])) continue;
+      if (COMMENT.test(lines[i])) {
+        directive(lines[i], options);
+        continue;
+      }
       const h = HEADER.exec(lines[i]);
       if (h) headers.push([h[1], h[2]]);
     }
     // The body: what's left, without a response handler or response file and the blank lines round it.
     const rest = [];
     for (i++; i < end; i++) {
-      if (/^\s*>\s*(\{%|\S)/.test(lines[i]) || /^\s*<>/.test(lines[i])) break;
+      if (HANDLER.test(lines[i]) || /^\s*<>/.test(lines[i])) break;
       rest.push(lines[i]);
+    }
+    // After it: the handlers.
+    const handlers = [];
+    for (; i < end; i++) {
+      const l = lines[i];
+      const script = /^\s*>\s*\{%(.*)$/.exec(l);
+      if (script) {
+        const line = i + 1;
+        let text = script[1];
+        while (!text.includes('%}') && i + 1 < end) text += `\n${lines[++i]}`;
+        handlers.push({ script: text.replace(/%\}[\s\S]*$/, '').replace(/^\n/, ''), line });
+        continue;
+      }
+      const file = /^\s*>\s+(?!>)(\S.*?)\s*$/.exec(l) ?? /^\s*>(?![>{])(\S.*?)\s*$/.exec(l);
+      if (file) handlers.push({ file: file[1], line: i + 1 });
     }
     while (rest.length && !rest.at(-1).trim()) rest.pop();
     while (rest.length && !rest[0].trim()) rest.shift();
@@ -83,7 +117,7 @@ export function parseHttpFile(text) {
       body = '';
     }
     const index = requests.length;
-    requests.push({ index, name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile });
+    requests.push({ index, name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile, handlers, options });
   });
   return { variables, requests };
 }

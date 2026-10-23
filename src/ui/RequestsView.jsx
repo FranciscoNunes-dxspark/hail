@@ -1,6 +1,6 @@
 import React from 'react';
 import { useInput } from 'ink';
-import { copyCurl, send } from '../actions.js';
+import { copyCurl, send, sendAll } from '../actions.js';
 import { theme } from '../theme.js';
 import { fit } from '../text.js';
 import { useListNav, useMouse } from './hooks.js';
@@ -21,6 +21,7 @@ export function RequestsView({ data, responses, ctx, width, height, active }) {
   const keys = (input, key) => {
     if (!ctx.viewHasKeys()) return;
     if (nav.handle(input, key)) return;
+    if (input === 'A') return sendAll(ctx);
     if (!sel) return;
     if (key.return) send(ctx, sel);
     else if (input === 'c') copyCurl(ctx, sel);
@@ -47,6 +48,7 @@ export function RequestsView({ data, responses, ctx, width, height, active }) {
         {requests.length === 0 ? <Row pointer={false} width={listW - 2} segments={[{ text: '  No requests yet: ### starts one.', color: theme.dim }]} /> : null}
         {requests.slice(nav.offset, nav.offset + innerH).map((r, i) => {
           const done = responses[r.label]?.response;
+          const failed = (responses[r.label]?.checks?.tests ?? []).some((t) => !t.passed) || Boolean(responses[r.label]?.checks?.error);
           return (
             <Row
               key={r.index}
@@ -56,6 +58,7 @@ export function RequestsView({ data, responses, ctx, width, height, active }) {
               segments={[
                 { text: fit(r.method, 7), color: methodColour(r.method), bold: true },
                 { text: done ? `${done.status} ` : '', color: done ? statusColour(done.status) : undefined },
+                { text: failed ? '✗ ' : '', color: theme.del, bold: true },
                 { text: r.name ?? r.url, strong: true },
               ]}
             />

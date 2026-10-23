@@ -27,7 +27,23 @@ export function requestLines(request, width) {
   return out;
 }
 
-/** `sent` ({ response, request, at }) as lines `width` wide; `headers` shows the response's headers too. */
+/** How a response's handlers went (runner.js's `checks`): a line per test, the script's error, what it logged. */
+export function checkLines(checks) {
+  if (!checks) return [];
+  const out = [];
+  for (const t of checks.tests ?? []) {
+    const why = !t.passed && t.message && t.message !== t.name ? [{ text: `: ${t.message}`, color: theme.dim }] : [];
+    out.push([{ text: t.passed ? '✓ ' : '✗ ', color: t.passed ? theme.add : theme.del, bold: true }, { text: t.name }, ...why]);
+  }
+  if (checks.error) out.push([{ text: '✗ ', color: theme.del, bold: true }, { text: checks.error, color: theme.del }]);
+  for (const l of checks.log ?? []) out.push([{ text: `› ${l}`, color: theme.dim }]);
+  return out;
+}
+
+/**
+ * `sent` ({ response, request, at, checks }) as lines `width` wide: the status, how its tests went,
+ * then the body. `headers` shows the response's headers too.
+ */
 export function responseLines(sent, width, { headers = false } = {}) {
   const r = sent.response;
   const out = [
@@ -37,6 +53,7 @@ export function responseLines(sent, width, { headers = false } = {}) {
     ],
   ];
   if (r.url !== sent.request.url) out.push([{ text: `→ ${r.url}`, color: theme.dim }]);
+  out.push(...checkLines(sent.checks));
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);
   for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) out.push([{ text: part }]);

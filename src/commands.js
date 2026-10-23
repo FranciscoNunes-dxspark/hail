@@ -3,7 +3,7 @@ import * as a from './actions.js';
 // Slash commands. `args` in square brackets are optional, so picking the command runs it straight away.
 // `complete` names the list offered while typing the first argument.
 export const COMMANDS = [
-  { name: 'send', args: '[request]', desc: 'Send a request (the one picked in Requests if none is named)', complete: 'requests', run: (ctx, s) => a.send(ctx, s) },
+  { name: 'send', args: '[request|all]', desc: 'Send a request (the one picked in Requests if none is named); all sends every one, top to bottom, and shows a report', complete: 'requests', run: (ctx, s) => a.send(ctx, s) },
   { name: 'env', args: '[name]', desc: 'The environment the variables come from (a list to pick from if none is named)', complete: 'environments', run: (ctx, s) => a.chooseEnvironment(ctx, s) },
   { name: 'curl', args: '[request]', desc: 'Copy a request, filled in, as a curl command', complete: 'requests', run: (ctx, s) => a.copyCurl(ctx, s) },
   { name: 'find', args: '<text>', desc: 'Find text in the file, in the Edit view (n and N go on to the next and the one before)', run: (ctx, s) => ctx.findInEditor(s) },
@@ -32,7 +32,7 @@ export function findCommand(name, user = []) {
 }
 
 function completions(kind, data, files) {
-  if (kind === 'requests') return (data?.requests ?? []).map((r) => r.name ?? r.label);
+  if (kind === 'requests') return [...(data?.requests ?? []).map((r) => r.name ?? r.label), ...(data?.requests?.length ? ['all'] : [])];
   if (kind === 'environments') return data?.environments.names ?? [];
   if (kind === 'files') return files;
   return [];

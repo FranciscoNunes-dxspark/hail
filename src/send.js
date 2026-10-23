@@ -1,12 +1,13 @@
 // Turning a parsed request into what goes over the wire, sending it, and showing what came back.
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { fill } from './variables.js';
 
 /**
- * The request with every placeholder filled in: { method, url, headers, body, missing, secrets },
- * `missing` being the variables nothing answered and `secrets` the secret values and tokens filled in.
- * A body from a file is read relative to the .http file's `dir`.
+ * The request with every placeholder filled in: { method, url, headers, body, missing, secrets,
+ * handlers }, `missing` being the variables nothing answered and `secrets` the secret values and
+ * tokens filled in. A body from a file is read relative to the .http file's `dir`, and so is a response
+ * handler's script file; `handlers` are the scripts to run on the response ([{ script, name }]).
  */
 export async function prepare(request, scope, { dir = process.cwd(), read = (p) => readFile(p, 'utf8') } = {}) {
   const missing = [];
@@ -26,7 +27,16 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
     const text = await read(isAbsolute(path) ? path : join(dir, path));
     body = request.bodyFile.fill ? await f(text) : text;
   }
-  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used] };
+  const at = (path) => (isAbsolute(path) ? path : join(dir, path));
+  const handlers = [];
+  for (const h of request.handlers ?? []) {
+    if (h.script != null) handlers.push({ script: h.script, name: `the script on line ${h.line}` });
+    else {
+      const path = await f(h.file);
+      handlers.push({ script: await read(at(path)), name: basename(path) });
+    }
+  }
+  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used], handlers };
 }
 
 /**

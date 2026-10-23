@@ -19,10 +19,11 @@ export const historyFile = (httpFile, dir = join(configDir(), 'history')) => joi
 const blank = (text, secrets) => secrets.reduce((t, s) => (s && s.length >= 4 ? t.split(s).join(HIDDEN) : t), String(text ?? ''));
 
 /**
- * What's kept of one response: { label, name, at, request, response } with the secrets used blanked
- * out everywhere, credential headers hidden, and a body over MAX_BODY cut (`truncated` set).
+ * What's kept of one response: { label, name, at, request, response, checks } with the secrets used
+ * blanked out everywhere (what the response handlers logged too), credential headers hidden, and a
+ * body over MAX_BODY cut (`truncated` set).
  */
-export function entryFor({ label, name, at, request, response }) {
+export function entryFor({ label, name, at, request, response, checks }) {
   const secrets = request.secrets ?? [];
   const headers = (list) => list.map(([k, v]) => [k, SENSITIVE.test(k) ? HIDDEN : blank(v, secrets)]);
   const body = blank(response.body, secrets);
@@ -41,6 +42,13 @@ export function entryFor({ label, name, at, request, response }) {
       size: response.size,
       url: blank(response.url, secrets),
     },
+    checks: checks
+      ? {
+          tests: checks.tests.map((t) => ({ name: blank(t.name, secrets), passed: t.passed, ...(t.message ? { message: blank(t.message, secrets) } : {}) })),
+          log: checks.log.map((l) => blank(l, secrets)),
+          error: checks.error ? blank(checks.error, secrets) : null,
+        }
+      : undefined,
   };
 }
 

@@ -13,6 +13,7 @@ import { saveConfig } from '../config.js';
 import { HELP } from '../help.js';
 import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
+import { defaultEnvironment } from '../environments.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
@@ -51,7 +52,7 @@ const CTRL_P = '\x10';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
-  requests: '↵ send · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
+  requests: '↵ send · A send all · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
   edit: '↵ or i type · ctrl+r send · ctrl+s save · ctrl+z undo · ctrl+f find · [ ] requests · c copy as curl',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
   history: '↵ show it · d compare with the one before · D forget them all',
@@ -76,13 +77,6 @@ function Header({ data, env, width, loading, mood }) {
   } else if (loading) segs.push({ text: '  loading…', color: theme.dim });
   const path = data?.dir ?? '';
   return <Row pointer={false} width={width} segments={[...fitSegments(segs, Math.max(20, width - stringWidth(path) - 1)), { text: ' ' }, { text: path, color: theme.dim }]} />;
-}
-
-/** The environment to use for `data`: the one picked for this file last time, else dev or local, else none. */
-export function defaultEnvironment(data, saved) {
-  const names = data?.environments.names ?? [];
-  if (saved && names.includes(saved)) return saved;
-  return names.find((n) => /^(dev|local)/i.test(n)) ?? null;
 }
 
 /** The tabs' labels and the columns each one covers (`from` up to `to`), which clicks are matched against. */
@@ -141,6 +135,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // What came back, by request label: { request, response, at }, `request` as it was sent.
   const [responses, setResponses] = useState({});
   const responsesRef = useRef({});
+  // client.global.set's variables: kept for the open file until another is opened or Hail closes.
+  const globalsRef = useRef({});
   const selectedRef = useRef(0);
   const fileRef = useRef(initialFile ?? null);
   // The responses kept for the open file, oldest first (history.js), and the file they're kept in.
@@ -347,7 +343,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         const entries = readHistory(hf);
         historyRef.current = { file: hf, entries };
         setHistory(entries);
-        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at }]));
+        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at, checks: e.checks }]));
         setResponses(responsesRef.current);
       }
     } catch (e) {
@@ -365,6 +361,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     setLoading(true);
     responsesRef.current = {};
     setResponses({});
+    globalsRef.current = {};
     selectedRef.current = 0;
     setOverlay(null);
     setView('requests');
@@ -449,23 +446,28 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       const named = {};
       for (const r of d?.requests ?? []) if (r.name && responsesRef.current[r.label]) named[r.name] = responsesRef.current[r.label].response;
       return {
+        globals: globalsRef.current,
         environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}),
         file: d?.variables ?? {},
         responses: named,
         env: { azToken, secret: (name) => credentials.get(name) },
       };
     },
+    // The global variables response handlers set (client.global.set), for the open file while Hail runs.
+    globals: () => globalsRef.current,
+    setGlobals: (g) => (globalsRef.current = g),
     // The views say which request the cursor is on, so commands and the Response view act on it.
     selectRequest: (i) => (selectedRef.current = i),
     selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
     selectedIndex: () => selectedRef.current,
-    setResponse: (request, sentAs, response) => {
+    // `extra`: { checks } (how its response handlers went).
+    setResponse: (request, sentAs, response, extra = {}) => {
       const at = Date.now();
-      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at } };
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at, ...extra } };
       setResponses(responsesRef.current);
       const h = historyRef.current;
       if (!h.file) return;
-      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response });
+      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks });
       historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
       setHistory(historyRef.current.entries);
     },

@@ -13,6 +13,18 @@ import { terminalMouse } from './mouse.js';
 
 const args = process.argv.slice(2);
 
+// hail test api.http [--env dev]: every request without the UI, for CI.
+if (args[0] === 'test') {
+  const { runTests } = await import('./headless.js');
+  const { osCredentials } = await import('./credentials.js');
+  const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  const code = await runTests(args.slice(1), { credentials: osCredentials, color });
+  // Everything written gets out before exiting, piped or not (pipes are asynchronous on Windows).
+  await new Promise((r) => process.stdout.write('', r));
+  await new Promise((r) => process.stderr.write('', r));
+  process.exit(code);
+}
+
 if (args.includes('-v') || args.includes('--version')) {
   console.log(`hail ${VERSION}`);
   process.exit(0);
@@ -20,9 +32,13 @@ if (args.includes('-v') || args.includes('--version')) {
 
 if (args.includes('-h') || args.includes('--help')) {
   console.log(`hail [file.http]
+hail test [file.http] [--env <name>]
 
 An HTTP client for the terminal, over .http files. Opens [file.http], or the
 first .http file in the current folder (or the folders under it).
+
+hail test sends every request in the file without the UI, prints a report of
+their response handlers' tests, and exits with 1 if anything failed.
 
 Inside: ↵ sends the request under the cursor, e picks the environment,
 ? shows every key, / the commands.`);

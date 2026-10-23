@@ -36,3 +36,10 @@ export function loadEnvironments(dir) {
   });
   return environmentsFrom(files);
 }
+
+/** The environment to use for `data`: the one picked for this file last time, else dev or local, else none. */
+export function defaultEnvironment(data, saved) {
+  const names = data?.environments.names ?? [];
+  if (saved && names.includes(saved)) return saved;
+  return names.find((n) => /^(dev|local)/i.test(n)) ?? null;
+}

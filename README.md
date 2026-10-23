@@ -28,6 +28,7 @@ npm start -- api.http
 ```bash
 hail api.http     # that file
 hail              # the first .http (or .rest) file in this folder or the two below it
+hail test api.http [--env dev]   # send them all without the screen and report (for CI)
 ```
 
 With none, `/new` writes an example to start from.
@@ -50,7 +51,7 @@ Authorization: Bearer {{login.response.body.token}}
 `###` starts a request, and the rest of its line names it. Under it: the method and URL (a plain URL is
 a GET), the headers, a blank line, and the body. A body can come from a file: `< ./body.json` as it is,
 `<@ ./body.json` with its variables filled in. Query lines under the URL (`?page=2`, `&size=10`) are
-joined onto it. JetBrains' response handlers (`> {% ... %}`) are skipped.
+joined onto it. After the body, a response handler can check what comes back (see [Checking responses](#checking-responses)).
 
 Hail reads the file again whenever it's saved, so it can sit beside your editor, or you can edit it
 in Hail itself.
@@ -101,6 +102,67 @@ be committed. The environment wins over the file, so a file can hold defaults th
 variable can be made of others. A request with a variable nothing gives a value isn't sent: Hail
 says which.
 
+### Checking responses
+
+JetBrains' response handlers work as they do there: after a request's body, `> {% ... %}` holds a script
+(over as many lines as it needs), or `> ./checks.js` names a file of one beside the `.http` file. It runs
+when the response comes, and what it found shows with the response: a line for each test, passed or
+failed, and what it logged.
+
+```http
+### Log in
+POST {{host}}/login
+Content-Type: application/json
+
+{ "user": "ana", "password": "{{$secret password}}" }
+
+> {%
+  client.test("signed in", () => client.assert(response.status === 200, "got " + response.status));
+  client.test("a token came back", () => client.assert(response.body.token, "no token"));
+  client.global.set("token", response.body.token);
+%}
+
+### Who am I
+GET {{host}}/me
+Authorization: Bearer {{token}}
+```
+
+| In a script | |
+| --- | --- |
+| `client.test(name, fn)` | A test: it passes unless `fn` throws |
+| `client.assert(condition, message)` | Throws (failing the test it's in) when the condition is false; outside a test it fails as a test of its own |
+| `client.global.set(name, value)` | A variable for the requests after it: `{{name}}` reads it. `client.global.get(name)` reads it back, `clear(name)` and `clearAll()` forget them |
+| `client.log(...)` | A line under the response (`console.log` too) |
+| `client.exit()` | Stops the script there |
+| `response.status`, `response.body` | The status, and the body: parsed when it's JSON, else the text |
+| `response.headers.valueOf(name)` | A header's value (`valuesOf(name)` gives every one, for `Set-Cookie`) |
+| `response.contentType` | `{ mimeType, charset }` |
+
+A global variable wins over the environment's and the file's of the same name, as the newest value. The
+globals last until Hail closes or another file is opened. Scripts run in a sandbox of their own: no
+`require`, no `process`, no timers, no files, nothing from Hail but the response, and two seconds to
+finish. The tests are kept in the history with the response.
+
+### Sending the whole file
+
+`A` in Requests (or `/send all`) sends every request in the file, top to bottom, each one using what the
+ones above it left: their responses and the globals their scripts set. A request with a variable
+nothing gives a value is passed over; one that gets no answer stops the run; failed tests don't. Then a
+report shows each request's status, how long it took and how its tests went, with the failures under
+it.
+
+From the shell, for CI:
+
+```bash
+hail test api.http --env dev
+```
+
+does the same without the screen: it prints the report and exits with 1 when a test failed, a script
+broke, or a request wasn't sent or got no answer (2 when it couldn't run at all, as with a file that
+isn't there). Without `--env` it uses the environment Hail would pick (the one chosen last for the
+file, else dev or local). Nothing is kept in the history. `{{$secret}}` reads the system's store as Hail
+does; on a build server, `{{$processEnv NAME}}` is usually the way to hand it a secret.
+
 ### History
 
 Every response is kept, across runs, in `~/.hail/history` (one file per `.http` file). When a file is
@@ -132,6 +194,7 @@ that defines the routes.
 | --- | --- |
 | `1` `2` `3` `4` `5` / `tab` | Requests, Edit, Response, History, Log (`shift+tab` goes back) |
 | `↵` | Send the request under the cursor; in Response, send it again; in Edit, start typing |
+| `A` | In Requests: send every request, top to bottom, and show a report |
 | `i` | Edit the file, typing, on the request under the cursor |
 | `ctrl+r` | In Edit: send the request the cursor is in |
 | `c` | Copy the request as a curl command, variables filled in |
@@ -154,7 +217,8 @@ mouse works too: click a tab, a row or the prompt, double-click for `↵`, scrol
 drag to select text, which is copied when you let go.
 
 Beside the list is the request under the cursor as written, or, once it's been sent, its response:
-the status, how long it took, its size, and the body, JSON indented.
+the status, how long it took, its size, how its tests went, and the body, JSON indented. A request whose
+tests failed has a ✗ beside its status in the list.
 
 ### The command palette
 
@@ -186,7 +250,7 @@ and Trawl.
 
 | Command | What it does |
 | --- | --- |
-| `/send [request]` | Send a request by name (the one under the cursor if none is named) |
+| `/send [request]` | Send a request by name (the one under the cursor if none is named); `/send all` sends every one and shows a report |
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
 | `/open <file.http>` | Open another file |
