@@ -1,6 +1,10 @@
 // The shortcuts taken for speed give what the long way gives.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { readHistory } from '../src/history.js';
 import { highlight, highlightLines } from '../src/http-file.js';
 import { wrap } from '../src/text.js';
 import { bodyLines, responseLines, wrapIndented } from '../src/ui/response.js';
@@ -79,4 +83,19 @@ test("a request's body after a multipart part left open is still a body, not a p
   const kinds = highlight(FILE).map((runs) => runs.map((r) => r.kind ?? '-').join(' '));
   // "--B" then ### Q: the next request starts afresh.
   assert.equal(kinds[17], 'keyword -');
+});
+
+test('history read from its bytes: characters of every width, CRLF, blank lines and a line cut short', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hail-perf-'));
+  try {
+    const file = join(dir, 'h.jsonl');
+    const bodies = ['plain', 'café ☕ 漢字 🦉', 'a\nb', '"quoted"\\'];
+    writeFileSync(file, `${bodies.map((body, i) => JSON.stringify({ label: `r${i}`, at: i, response: { body } })).join('\r\n')}\n\n  \n{"label":"cut","at":`);
+    assert.deepEqual(readHistory(file).map((e) => e.response.body), bodies);
+    writeFileSync(file, '');
+    assert.deepEqual(readHistory(file), []);
+    assert.deepEqual(readHistory(join(dir, 'none.jsonl')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
