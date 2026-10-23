@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.js';
 import { send } from '../src/send.js';
-import { highlight, highlightLines } from '../src/http-file.js';
+import { highlight, highlightLines, parseHttpFile } from '../src/http-file.js';
 import { wrap } from '../src/text.js';
 import { bodyLines, responseLines, wrapIndented } from '../src/ui/response.js';
 
@@ -120,4 +120,29 @@ test('requests sharing one signal leave no listeners on it, and it still cancels
     server.closeAllConnections();
     server.close();
   }
+});
+
+test('a file parsed again after an edit reads as it does parsed afresh, and changing what it gave changes nothing kept', () => {
+  let text = FILE;
+  const edits = [(t) => t.replace('/items', '/things'), (t) => `### New\nGET /new\n\n${t}`, (t) => t.replace('### Q\n', ''), (t) => t.replace('@host = https://example.com', '@host = http://localhost'), (t) => `${t}\n###\nGET /x\n> ./check.js`];
+  for (const edit of edits) {
+    const before = parseHttpFile(text);
+    text = edit(text);
+    const warm = JSON.stringify(parseHttpFile(text));
+    parseHttpFile('GET /nothing-in-common');
+    assert.equal(warm, JSON.stringify(parseHttpFile(text)), 'the same as a parse that kept nothing');
+    assert.ok(before.requests.length);
+  }
+  const a = parseHttpFile(text);
+  const handlers = a.requests[2].handlers.length;
+  a.requests[1].headers.push(['X-Added', '1']);
+  a.requests[1].options.timeout = '5';
+  a.requests[2].handlers.push({ file: 'x.js', line: 1 });
+  const b = parseHttpFile(text);
+  assert.deepEqual(b.requests[1].headers.map(([k]) => k), ['Content-Type']);
+  assert.deepEqual(b.requests[1].options, { 'no-redirect': true });
+  assert.equal(b.requests[2].handlers.length, handlers);
+  // The same block twice in a file: each request its own, with its own line.
+  const twice = parseHttpFile('###\nGET /a\n###\nGET /a\n');
+  assert.deepEqual(twice.requests.map((r) => [r.index, r.line]), [[0, 2], [1, 4]]);
 });

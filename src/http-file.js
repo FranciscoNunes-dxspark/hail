@@ -52,82 +52,118 @@ export function parseHttpFile(text) {
   lines.forEach((l, i) => {
     if (SEPARATOR.test(l)) blocks.push({ start: i + 1, title: l.replace(/^#+/, '').trim() });
   });
+  // A block reads the same wherever it is in the file, so one already read (the editor parses the
+  // file on every key, where all but one block are as they were) is taken from the last parse.
+  const seen = new Map();
   blocks.forEach((block, b) => {
     const end = b + 1 < blocks.length ? blocks[b + 1].start - 1 : lines.length;
-    let name = block.title || null;
-    let i = block.start;
-    const options = {};
-    // Before the request line: comments (one may name it), blank lines and file variables.
-    let request = null;
-    for (; i < end; i++) {
-      const l = lines[i];
-      const named = NAME.exec(l);
-      if (named) name = named[1];
-      else if (COMMENT.test(l)) directive(l, options);
-      if (!l.trim() || COMMENT.test(l)) continue;
-      const variable = FILE_VARIABLE.exec(l);
-      if (variable) {
-        variables[variable[1]] = variable[2];
-        continue;
-      }
-      const m = REQUEST_LINE.exec(l);
-      if (!m) continue;
-      request = { method: (m[1] ?? 'GET').toUpperCase(), url: m[2] ?? m[3], line: i + 1 };
-      i++;
-      break;
-    }
-    if (!request) return;
-    // Query lines under the URL (VS Code): "?a=1" and "&b=2".
-    for (; i < end && /^\s*[?&]/.test(lines[i]); i++) request.url += lines[i].trim();
-    const headers = [];
-    for (; i < end && lines[i].trim(); i++) {
-      if (COMMENT.test(lines[i])) {
-        directive(lines[i], options);
-        continue;
-      }
-      const h = HEADER.exec(lines[i]);
-      if (h) headers.push([h[1], h[2]]);
-    }
-    // The body: what's left, without a response handler or response file and the blank lines round it.
-    const rest = [];
-    for (i++; i < end; i++) {
-      if (HANDLER.test(lines[i]) || /^\s*<>/.test(lines[i])) break;
-      rest.push(lines[i]);
-    }
-    // After it: the handlers, and where to save the response.
-    const handlers = [];
-    let output = null;
-    for (; i < end; i++) {
-      const l = lines[i];
-      const save = /^\s*>>(!?)\s*(\S.*?)\s*$/.exec(l);
-      if (save) {
-        output = { path: save[2], overwrite: save[1] === '!' };
-        continue;
-      }
-      const script = /^\s*>\s*\{%(.*)$/.exec(l);
-      if (script) {
-        const line = i + 1;
-        let text = script[1];
-        while (!text.includes('%}') && i + 1 < end) text += `\n${lines[++i]}`;
-        handlers.push({ script: text.replace(/%\}[\s\S]*$/, '').replace(/^\n/, ''), line });
-        continue;
-      }
-      const file = /^\s*>\s+(?!>)(\S.*?)\s*$/.exec(l) ?? /^\s*>(?![>{])(\S.*?)\s*$/.exec(l);
-      if (file) handlers.push({ file: file[1], line: i + 1 });
-    }
-    while (rest.length && !rest.at(-1).trim()) rest.pop();
-    while (rest.length && !rest[0].trim()) rest.shift();
-    let body = rest.join('\n');
-    let bodyFile = null;
-    const file = /^<(@?)\s+(.+?)\s*$/.exec(body);
-    if (file && rest.length === 1) {
-      bodyFile = { path: file[2], fill: file[1] === '@' };
-      body = '';
-    }
-    const index = requests.length;
-    requests.push({ index, name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile, handlers, output, options });
+    const key = `${block.title}\n${lines.slice(block.start, end).join('\n')}`;
+    const read = seen.get(key) ?? parsedBlocks.get(key) ?? parseBlock(lines.slice(block.start, end), block.title);
+    seen.set(key, read);
+    for (const [name, value] of read.variables) variables[name] = value;
+    const r = read.request;
+    if (!r) return;
+    // Lines in the block from 0, made the file's.
+    requests.push({
+      index: requests.length,
+      name: r.name,
+      label: r.label,
+      method: r.method,
+      url: r.url,
+      line: r.line + block.start,
+      headers: r.headers.map((h) => [...h]),
+      body: r.body,
+      bodyFile: r.bodyFile && { ...r.bodyFile },
+      handlers: r.handlers.map((h) => ({ ...h, line: h.line + block.start })),
+      output: r.output && { ...r.output },
+      options: { ...r.options },
+    });
   });
+  parsedBlocks = seen;
   return { variables, requests };
+}
+
+// The blocks the last parse read, by their text (parseHttpFile).
+let parsedBlocks = new Map();
+
+/**
+ * One block's file variables, in order, and its request (or null), its `line` and its handlers'
+ * counted from the block's first line (1). `title` is what follows its ###.
+ */
+function parseBlock(lines, title) {
+  const variables = [];
+  const end = lines.length;
+  let name = title || null;
+  let i = 0;
+  const options = {};
+  // Before the request line: comments (one may name it), blank lines and file variables.
+  let request = null;
+  for (; i < end; i++) {
+    const l = lines[i];
+    const named = NAME.exec(l);
+    if (named) name = named[1];
+    else if (COMMENT.test(l)) directive(l, options);
+    if (!l.trim() || COMMENT.test(l)) continue;
+    const variable = FILE_VARIABLE.exec(l);
+    if (variable) {
+      variables.push([variable[1], variable[2]]);
+      continue;
+    }
+    const m = REQUEST_LINE.exec(l);
+    if (!m) continue;
+    request = { method: (m[1] ?? 'GET').toUpperCase(), url: m[2] ?? m[3], line: i + 1 };
+    i++;
+    break;
+  }
+  if (!request) return { variables, request: null };
+  // Query lines under the URL (VS Code): "?a=1" and "&b=2".
+  for (; i < end && /^\s*[?&]/.test(lines[i]); i++) request.url += lines[i].trim();
+  const headers = [];
+  for (; i < end && lines[i].trim(); i++) {
+    if (COMMENT.test(lines[i])) {
+      directive(lines[i], options);
+      continue;
+    }
+    const h = HEADER.exec(lines[i]);
+    if (h) headers.push([h[1], h[2]]);
+  }
+  // The body: what's left, without a response handler or response file and the blank lines round it.
+  const rest = [];
+  for (i++; i < end; i++) {
+    if (HANDLER.test(lines[i]) || /^\s*<>/.test(lines[i])) break;
+    rest.push(lines[i]);
+  }
+  // After it: the handlers, and where to save the response.
+  const handlers = [];
+  let output = null;
+  for (; i < end; i++) {
+    const l = lines[i];
+    const save = /^\s*>>(!?)\s*(\S.*?)\s*$/.exec(l);
+    if (save) {
+      output = { path: save[2], overwrite: save[1] === '!' };
+      continue;
+    }
+    const script = /^\s*>\s*\{%(.*)$/.exec(l);
+    if (script) {
+      const line = i + 1;
+      let text = script[1];
+      while (!text.includes('%}') && i + 1 < end) text += `\n${lines[++i]}`;
+      handlers.push({ script: text.replace(/%\}[\s\S]*$/, '').replace(/^\n/, ''), line });
+      continue;
+    }
+    const file = /^\s*>\s+(?!>)(\S.*?)\s*$/.exec(l) ?? /^\s*>(?![>{])(\S.*?)\s*$/.exec(l);
+    if (file) handlers.push({ file: file[1], line: i + 1 });
+  }
+  while (rest.length && !rest.at(-1).trim()) rest.pop();
+  while (rest.length && !rest[0].trim()) rest.shift();
+  let body = rest.join('\n');
+  let bodyFile = null;
+  const file = /^<(@?)\s+(.+?)\s*$/.exec(body);
+  if (file && rest.length === 1) {
+    bodyFile = { path: file[2], fill: file[1] === '@' };
+    body = '';
+  }
+  return { variables, request: { name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile, handlers, output, options } };
 }
 
 // {{placeholders}} inside a run of text, as runs of their own.
