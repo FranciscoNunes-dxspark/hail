@@ -16,7 +16,7 @@ import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
 import { checkContract, loadContract } from '../contract.js';
-import { contextIn } from '../family.js';
+import { contextIn, decodeContext, readMoods, writeMood } from '../family.js';
 import { replaceBody } from '../takes.js';
 import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
@@ -37,7 +37,7 @@ import { ResponseView } from './ResponseView.jsx';
 import { EditView } from './EditView.jsx';
 import { TextViewer } from './TextViewer.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
-import { FACES, moodFor } from '../pet.js';
+import { FACES, familyMood, moodFor, reactionLine } from '../pet.js';
 
 const VIEWS = [
   { id: 'requests', label: 'Requests' },
@@ -131,8 +131,9 @@ const DOUBLE_CLICK_MS = 400;
 // `copy` puts text on the clipboard (cli.jsx's; tests pass a stub). `checkUpdate` and `installUpdate`
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
 // `notify(title, body)` says a long run has finished (cli.jsx rings the terminal's bell and raises a
-// desktop notification); tests pass a recorder or nothing.
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify }) {
+// desktop notification); tests pass a recorder or nothing. `familyEvery` is how often (ms) the sibling
+// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do).
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, familyEvery = 30_000 }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -173,6 +174,22 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     const t = setTimeout(() => setMoodTick((n) => n + 1), 8100);
     return () => clearTimeout(t);
   }, [entries]);
+  // A sibling's mood Hoot remarks on (family.js's readMoods), once each, until esc.
+  const [reaction, setReaction] = useState(null);
+  const seenMoods = useRef(new Set());
+  const familyOn = config.familyMoods !== false;
+  useEffect(() => {
+    if (!familyOn) return setReaction(null);
+    const look = () => {
+      const m = readMoods('hail').find((x) => reactionLine(x) && !seenMoods.current.has(`${x.app}:${x.at}`));
+      if (!m) return;
+      seenMoods.current.add(`${m.app}:${m.at}`);
+      setReaction(m);
+    };
+    look();
+    const t = setInterval(look, familyEvery);
+    return () => clearInterval(t);
+  }, [familyOn, familyEvery]);
   // A word in the bottom line for a moment ("Copied 3 lines"), where it moves nothing on screen.
   const [flash, setFlash] = useState(null);
   useEffect(() => {
@@ -423,10 +440,11 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // A long run that ends says so, for when you've looked away (Settings' "Notify when done").
     const tell = (line) => notify && worthNotifying(Date.now() - b.started, configRef.current) && notify(`Hail: ${title}`, line);
     try {
-      const { stdout = '', stderr = '' } = await start(controller.signal);
+      // `worried`: it went, but not well (tests failed, the contract drifted), which Hoot shows.
+      const { stdout = '', stderr = '', worried } = await start(controller.signal);
       const out = [stdout.trimEnd(), stderr.trimEnd()].filter(Boolean).join('\n');
       lastOutput.current = { title, text: out || '(no output)' };
-      updateEntry(id, { status: 'ok', lines: out ? out.split('\n') : ['Done'] });
+      updateEntry(id, { status: 'ok', lines: out ? out.split('\n') : ['Done'], ...(worried ? { worried } : {}) });
       tell(firstLine(out) || 'Done');
       return { ok: true, out };
     } catch (error) {
@@ -781,6 +799,18 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // over an overlay), a key you mapped becomes the key it stands for, for the view and App alike, or
   // runs its command line. Then ctrl+p opens the palette, from a view or the prompt.
   const sendKey = useKeyTranslation((input) => {
+    // A paste while a view has the keys: a command line (or a sibling's context) goes into the prompt,
+    // for ↵, rather than being taken as keys. Not while typing in Edit, or over an overlay.
+    if (input.length > 1 && focusRef.current === 'view' && !overlayRef.current && !confirmRef.current) {
+      const text = input.replace(/\x1b\[20[01]~/g, '').replace(/[\r\n]+$/, '');
+      if (text.length > 1 && (text.startsWith('/') || decodeContext(text))) {
+        setPrompt(text.replace(/[\r\n]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, ''));
+        setSugIndex(0);
+        historyPos.current = -1;
+        setFocus('prompt');
+        return null;
+      }
+    }
     let out = input;
     if (focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && !ctx.claimsKey?.(input, {})) {
       const b = translateKey(customRef.current.keymap, viewRef.current, input);
@@ -925,6 +955,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       else {
         setEntries((list) => list.map((e) => ({ ...e, shown: false })));
         setWelcome(false);
+        setReaction(null);
       }
       return;
     }
@@ -1048,14 +1079,20 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const act = activityRows(entries.filter((e) => e.shown !== false));
   const bottom = confirmReq ? confirmHeight(confirmReq) : 3 + suggestions.length;
   const mood = moodFor({ data, busy, lastEntry: entries.at(-1) });
+  // Hoot's mood, for the siblings, written whenever it changes.
+  const shared = familyMood(mood, { busy, lastEntry: entries.at(-1) });
+  useEffect(() => {
+    if (familyOn) writeMood('hail', shared);
+  }, [shared.mood, familyOn]);
+  const reactionRow = reaction ? [{ text: reactionLine(reaction), color: theme.accent }, { text: '  esc', color: theme.dim }] : null;
   // The welcome box only appears when the terminal has room for it next to a useful view.
   const showWelcome = welcome && H >= 28;
-  const mainH = Math.max(6, H - 2 - act.length - (busy ? 1 : 0) - bottom - 1 - (showWelcome ? WELCOME_HEIGHT : 0));
+  const mainH = Math.max(6, H - 2 - (reactionRow ? 1 : 0) - act.length - (busy ? 1 : 0) - bottom - 1 - (showWelcome ? WELCOME_HEIGHT : 0));
   const viewActive = focus === 'view' && !overlay && !confirmReq;
   layout.current = {
     mainTop: 2,
     mainH,
-    promptTop: 2 + mainH + (showWelcome ? WELCOME_HEIGHT : 0) + act.length + (busy ? 1 : 0),
+    promptTop: 2 + mainH + (showWelcome ? WELCOME_HEIGHT : 0) + (reactionRow ? 1 : 0) + act.length + (busy ? 1 : 0),
     sugCount: suggestions.length,
     tabs: tabLabels(entries),
   };
@@ -1120,6 +1157,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         {main}
       </Box>
       {showWelcome ? <Welcome mood={mood} data={data} width={W} update={update} /> : null}
+      {reactionRow ? <Row pointer={false} width={W} segments={reactionRow} /> : null}
       {act.map((segs, i) => (
         <Row key={i} pointer={false} width={W} segments={segs} />
       ))}

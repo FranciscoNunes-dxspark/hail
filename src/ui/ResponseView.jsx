@@ -61,6 +61,10 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
     if (input === 'n') return goTo(s.at + 1);
     if (input === 'N') return goTo(s.at - 1);
   };
+  // A search being typed stops when the view loses the keys (a pasted command opened the prompt), keeping what's typed.
+  useEffect(() => {
+    if (!active && searchRef.current.typing) setSearch({ ...searchRef.current, typing: false });
+  }, [active]);
   // Typing a search, and / n N esc while one is up, are this view's, not the app's.
   useEffect(() => () => void (ctx.claimsKey = null), []);
   ctx.claimsKey = active ? (input, key) => searchRef.current.typing || input === '/' || (Boolean(searchRef.current.query) && (key.escape || input === 'n' || input === 'N')) : null;

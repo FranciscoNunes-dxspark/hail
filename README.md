@@ -328,6 +328,21 @@ over and press `↵`.
 | A log line (Bosun copies them from a process's log) | Its request id (or, when it has none, the ids in its text: GUIDs, trace ids, `request_id=…`) is looked for in the History: the newest response whose request or response headers carry it (`X-Request-Id`, `Request-Id`, `traceparent`'s trace id, correlation ids, `X-Amzn-Trace-Id`) is shown, with the History's cursor on it. Those headers are kept in the history as they are; only credential headers are hidden |
 | Anything else | Said to be another app's: a commit, a file or an exception is Splice's, a query is Trawl's |
 
+`/family` lists what the open file's project offers the others, from its folder and the git checkout
+it's in: Splice's `/open <checkout>`, Bosun's `/move <folder>` when there's something to run there
+(`bosun.json`, a `Procfile`, a compose file, or `package.json`'s `dev` or `start` script), and for each
+database the project's settings name (`appsettings*.json`'s `ConnectionStrings`, `DATABASE_URL`-style
+lines in `.env` files) the line Trawl connects with: `/azure-sql <server> [database]` for Azure SQL
+signed in with Entra ID, else `/add <name> <server> [database]` with `--kind` and `--user` as the
+connection says, never its password (Trawl asks for that). `↵` copies the one under the cursor.
+
+Each app's mascot also says how it feels, in a small file the others read (`~/.family`). Hoot's mood
+(happy after a response, worried when one failed its checks or something went wrong, busy while
+sending) is written whenever it changes, and every 30 seconds Hoot looks at the others': when one of
+them has been worried, sad or happy in the last 15 minutes, he says so once in a line above the
+activity lines ("Sonar looks worried: production has 12 new exceptions"), until `esc`. The Family moods
+setting turns both off.
+
 ## Keys
 
 | Key | What it does |
@@ -349,7 +364,7 @@ over and press `↵`.
 | `r` | Read the file again |
 | `/` or `:` | The command prompt, with completion |
 | `!` | Run a shell command, e.g. `!node --version` |
-| `esc` | Cancel the request on its way, or clear the activity lines |
+| `esc` | Cancel the request on its way, or clear the activity lines (and Hoot's remark about a sibling) |
 | `,` | Settings |
 | `?` | Every key and command |
 | `q` / `ctrl+c` | Quit |
@@ -406,9 +421,10 @@ and Trawl.
 | `/draft <spec> [what]` | Claude writes requests from an API description, for you to look over and add |
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/take <family:v1:…>` | Take what a sibling app copied (see [With the sibling apps](#with-the-sibling-apps)) |
+| `/family` | What this project offers the sibling apps: the command for Splice, Bosun or Trawl, copied with `↵` |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
-| `/settings` | Accent colour, theme, mouse, updates, notifications, history |
+| `/settings` | Accent colour, theme, mouse, updates, notifications, family moods, history |
 | `/accent <#rrggbb>` | Change the accent colour (`default` puts it back) |
 | `/update` | Look for a new version now and install it |
 | `/help` | Keys and commands |
@@ -427,6 +443,7 @@ picked for each file, the files opened lately and the names (never the values) o
 | Check for new versions | Once a day, in the downloaded builds |
 | Install them by itself | Off only says a new version is out |
 | Notify when done | When a request (or `/send all`, or anything else with the spinner) takes over 10 seconds, Hail rings the terminal's bell and asks it for a desktop notification saying what finished and how (OSC 9, which Windows Terminal, iTerm2, WezTerm and kitty show, or OSC 777 in GNOME Terminal and other VTE terminals), for when you've switched to another window. A run you cancel says nothing. `"notifyAfter": 30` in `config.json` changes the seconds |
+| Family moods | Hoot shares his mood with the sibling apps and remarks on theirs (see [With the sibling apps](#with-the-sibling-apps)); off keeps him to himself |
 | Prompt history | Clear it |
 
 ## License

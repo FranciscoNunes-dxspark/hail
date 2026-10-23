@@ -14,6 +14,8 @@ let lastApp = null;
 export function tempHome() {
   const dir = mkdtempSync(join(tmpdir(), 'hail-'));
   process.env.HAIL_HOME = dir;
+  // The family's moods (family.js) go here too, never to the real ~/.family.
+  process.env.FAMILY_HOME = join(dir, 'family');
   return () => rmSync(dir, { recursive: true, force: true });
 }
 

@@ -52,6 +52,13 @@ export function settingRows(config, { file = '', mouse = true } = {}) {
       note: isOn(config.notify) ? `a bell and a notification when a request takes over ${notifySeconds(config)} s` : 'say nothing when a long request ends',
       action: 'toggle',
     },
+    {
+      id: 'familyMoods',
+      label: 'Family moods',
+      value: isOn(config.familyMoods) ? 'on' : 'off',
+      note: isOn(config.familyMoods) ? "Hoot shares his mood with the sibling apps and remarks on theirs" : 'keep moods to himself',
+      action: 'toggle',
+    },
     { id: 'history', label: 'Prompt history', value: count(history.length, 'entry', 'entries'), note: history.length ? 'clear it' : '', action: history.length ? 'clear' : 'none' },
     { id: 'file', label: 'Settings file', value: file, note: '', action: 'none' },
   ];

@@ -13,7 +13,7 @@ export const HELP = [
       ['!', 'Run a shell command, e.g.  !node --version'],
       ['r', 'Read the file again (it also reloads by itself when saved)'],
       ['esc', 'Cancel the request on its way, or clear the activity lines'],
-      [',', 'Settings (/settings): accent colour, theme (dark, light, or auto from the terminal), mouse, updates,\nnotifying when a request takes over 10 s (a bell and a desktop notification), history'],
+      [',', 'Settings (/settings): accent colour, theme (dark, light, or auto from the terminal), mouse, updates,\nnotifying when a request takes over 10 s (a bell and a desktop notification), family moods, history'],
       ['?', 'This help'],
       ['q / ctrl+c', 'Quit'],
       ['mouse', 'Click a tab, a row or the prompt · double-click does ↵ · the wheel scrolls\ndrag to select text, copied when you let go'],
@@ -147,6 +147,8 @@ export const HELP = [
     rows: [
       ['/take family:v1:…', 'What a sibling copied (/take is optional): a request from Sonar is added as ### replay <METHOD> <path>,\nto the environment\'s {{host}} or to where it came from, and picked to send\nrows from Trawl become a JSON body: a new POST to {{host}}/<table>, or the body of the request under the cursor (ctrl+z in Edit undoes it)\na log line from Bosun: the response in History whose headers carry its request id (X-Request-Id, traceparent…)'],
       ['paste', 'A line starting with / (or a family:v1: context) pasted while a view has the keys opens the prompt with it, for ↵'],
+      ['/family', 'What this project offers the others, ↵ copies it: Splice /open <checkout> · Bosun /move <folder>\nTrawl /azure-sql or /add for each database in appsettings*.json and .env (never a password)'],
+      ['moods', 'Hoot shares his mood and, every 30 s, remarks once on a sibling that is worried, sad or happy (esc puts it away)\nthe Family moods setting turns it off'],
     ],
   },
   {
