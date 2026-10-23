@@ -20,7 +20,7 @@ import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
 import { contextIn, describeContext, projectAt, repoRoot, shareLine } from './family.js';
-import { OWNERS, findByRequestId, hostVariable, idsIn, replayBlock, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
+import { OWNERS, findByRequestId, hostVariable, idsIn, replayBlock, startsWithVariable, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -564,7 +564,7 @@ async function takeRequest(ctx, data) {
     const title = block.split('\n')[0].replace(/^###\s*/, '');
     ctx.note(`Added ${title} to ${ctx.data.name}: ↵ sends it${dropped.length ? `\nLeft out ${dropped.join(', ')}: credentials don't travel between apps` : ''}`, 'ok');
   };
-  if (!hostVar) return add(false);
+  if (!hostVar || startsWithVariable(data.url)) return add(false);
   const env = ctx.environment();
   let origin;
   try {

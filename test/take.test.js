@@ -15,6 +15,7 @@ test('a replayed request: its path under {{host}} or as it came, connection and 
   assert.equal(r.block, '### replay POST /api/orders\nPOST {{baseUrl}}/api/orders?x=1\nContent-Type: application/json\nX-Trace: a\n\n{\n  "id": 1\n}\n');
   assert.deepEqual(r.dropped, ['Authorization']);
   assert.match(replayBlock({ url: 'https://prod.example.com/a' }).block, /^### replay GET \/a\nGET https:\/\/prod\.example\.com\/a\n$/);
+  assert.equal(replayBlock({ method: 'GET', url: '{{host}}/players/{id}', headers: {}, body: '' }, { hostVar: 'baseUrl' }).block, '### replay GET /players/{id}\nGET {{host}}/players/{id}\n');
   assert.equal(hostVariable({ baseURL: 'x' }), 'baseURL');
   assert.equal(hostVariable({ other: 'x' }), null);
 });

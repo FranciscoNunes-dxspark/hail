@@ -17,6 +17,12 @@ const CREDENTIAL = /^(authorization|proxy-authorization|cookie|x-api-key|api-key
 
 /** A URL's path and query, and its scheme and host: { origin, path, pathname }. */
 function split(url) {
+  // Already written against a variable (Trawl's {{host}}/players): that's its origin.
+  const variable = /^(\{\{[^}]+\}\})(.*)$/.exec(String(url ?? ''));
+  if (variable) {
+    const path = variable[2] || '/';
+    return { origin: variable[1], path, pathname: path.replace(/[?#].*$/, ''), variable: true };
+  }
   try {
     const u = new URL(url);
     return { origin: u.origin, path: `${u.pathname}${u.search}`, pathname: u.pathname };
@@ -46,8 +52,8 @@ function bodyText(body) {
  */
 export function replayBlock(data, { hostVar = null } = {}) {
   const method = String(data.method ?? 'GET').toUpperCase();
-  const { origin, path, pathname } = split(data.url);
-  const url = hostVar ? `{{${hostVar}}}${path}` : `${origin}${path}`;
+  const { origin, path, pathname, variable } = split(data.url);
+  const url = hostVar && !variable ? `{{${hostVar}}}${path}` : `${origin}${path}`;
   const dropped = [];
   const headers = [];
   for (const [k, v] of Object.entries(data.headers ?? {})) {
@@ -63,6 +69,9 @@ export function replayBlock(data, { hostVar = null } = {}) {
   if (body) lines.push('', ...body.split(/\r?\n/).map((l) => (/^###/.test(l) ? ` ${l}` : l)));
   return { block: `${lines.join('\n')}\n`, dropped };
 }
+
+/** Whether a request's URL already starts with a {{variable}} (so there's no host to swap). */
+export const startsWithVariable = (url) => /^\{\{[^}]+\}\}/.test(String(url ?? ''));
 
 /** Rows from Trawl ({ columns, rows }) as JSON: an array of objects, or one object for one row. */
 export function rowsJson(data) {
