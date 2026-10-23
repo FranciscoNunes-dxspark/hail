@@ -802,7 +802,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // A paste while a view has the keys: a command line (or a sibling's context) goes into the prompt,
     // for ↵, rather than being taken as keys. Not while typing in Edit, or over an overlay.
     // (A terminal ends a pasted line with \r, which the family's rule takes as a \n.)
-    const text = focusRef.current === 'view' && !overlayRef.current && !confirmRef.current ? pastedLine(input.replace(/\r$/, '\n')) : null;
+    const text = focusRef.current === 'view' && !overlayRef.current && !confirmRef.current ? pastedLine(input) : null;
     if (text) {
       setPrompt(text.replace(/[\x00-\x1f\x7f]/g, ''));
       setSugIndex(0);
