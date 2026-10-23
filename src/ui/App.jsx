@@ -16,7 +16,7 @@ import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
 import { checkContract, loadContract } from '../contract.js';
-import { contextIn, decodeContext, readMoods, writeMood } from '../family.js';
+import { contextIn, pastedLine, readMoods, writeMood } from '../family.js';
 import { replaceBody } from '../takes.js';
 import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
@@ -801,15 +801,14 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const sendKey = useKeyTranslation((input) => {
     // A paste while a view has the keys: a command line (or a sibling's context) goes into the prompt,
     // for ↵, rather than being taken as keys. Not while typing in Edit, or over an overlay.
-    if (input.length > 1 && focusRef.current === 'view' && !overlayRef.current && !confirmRef.current) {
-      const text = input.replace(/\x1b\[20[01]~/g, '').replace(/[\r\n]+$/, '');
-      if (text.length > 1 && (text.startsWith('/') || decodeContext(text))) {
-        setPrompt(text.replace(/[\r\n]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, ''));
-        setSugIndex(0);
-        historyPos.current = -1;
-        setFocus('prompt');
-        return null;
-      }
+    // (A terminal ends a pasted line with \r, which the family's rule takes as a \n.)
+    const text = focusRef.current === 'view' && !overlayRef.current && !confirmRef.current ? pastedLine(input.replace(/\r$/, '\n')) : null;
+    if (text) {
+      setPrompt(text.replace(/[\x00-\x1f\x7f]/g, ''));
+      setSugIndex(0);
+      historyPos.current = -1;
+      setFocus('prompt');
+      return null;
     }
     let out = input;
     if (focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && !ctx.claimsKey?.(input, {})) {

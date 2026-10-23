@@ -1,9 +1,6 @@
 // What Hail does with what the sibling apps hand it (`/take <context>`, family.js): a request from
 // Sonar's logs replayed, rows from Trawl as a body, a log line from Bosun found in the history. Pure.
 
-/** The siblings each kind Hail doesn't take is for. */
-export const OWNERS = { exception: 'Splice', commit: 'Splice', file: 'Splice', query: 'Trawl' };
-
 /** The environment variables that say where the API is, in the order they're looked for. */
 export const HOST_VARIABLES = ['host', 'baseUrl', 'baseURL'];
 

@@ -333,7 +333,7 @@ it's in: Splice's `/open <checkout>`, Bosun's `/move <folder>` when there's some
 (`bosun.json`, a `Procfile`, a compose file, or `package.json`'s `dev` or `start` script), and for each
 database the project's settings name (`appsettings*.json`'s `ConnectionStrings`, `DATABASE_URL`-style
 lines in `.env` files) the line Trawl connects with: `/azure-sql <server> [database]` for Azure SQL
-signed in with Entra ID, else `/add <name> <server> [database]` with `--kind` and `--user` as the
+signed in with Entra ID, else `/add <name> <server> [database]` with its port, `--kind`, `--user` and `--trust-cert` as the
 connection says, never its password (Trawl asks for that). `↵` copies the one under the cursor.
 
 Each app's mascot also says how it feels, in a small file the others read (`~/.family`). Hoot's mood

@@ -8,7 +8,7 @@ import { configFile } from './config.js';
 import { driftSummary, loadContract } from './contract.js';
 import { curlToHttp, parseCurl } from './curl.js';
 import { changedOnly, lineDiff } from './diff.js';
-import { writeExample } from './files.js';
+import { pathArg, writeExample } from './files.js';
 import { previousOf } from './history.js';
 import { run } from './run.js';
 import { checkSummary } from './checks.js';
@@ -19,8 +19,8 @@ import { parseTimeout } from './transport.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
-import { contextIn, describeContext, projectAt, repoRoot, shareLine } from './family.js';
-import { OWNERS, findByRequestId, hostVariable, idsIn, replayBlock, startsWithVariable, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
+import { APP_NAMES, contextIn, copiedNote, describeContext, notMine, projectAt, repoRoot, shareLine, trawlLine } from './family.js';
+import { findByRequestId, hostVariable, idsIn, replayBlock, startsWithVariable, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -463,7 +463,7 @@ export function chooseEnvironment(ctx, name) {
 /** /open: another .http file. */
 export async function open(ctx, path) {
   if (!path.trim()) return ctx.prefill('/open ');
-  return ctx.openFile(resolve(path.trim()));
+  return ctx.openFile(resolve(pathArg(path)));
 }
 
 /** /new: writes an example .http file (requests.http unless named) and opens it. */
@@ -538,8 +538,7 @@ export async function take(ctx, rest) {
   if (c.kind === 'request') return takeRequest(ctx, c.data);
   if (c.kind === 'rows') return takeRows(ctx, c.data);
   if (c.kind === 'logline') return takeLogline(ctx, c.data);
-  const owner = OWNERS[c.kind];
-  return ctx.note(`That's for ${owner ?? 'another app'}: paste it into ${owner ?? 'its'}'s prompt (${describeContext(c)}).`, 'error');
+  return ctx.note(notMine('hail', c), 'error');
 }
 
 const NO_FILE = 'Open a .http file first: /open <file>, or /new for an example.';
@@ -634,13 +633,6 @@ function takeLogline(ctx, data) {
   ctx.note(`${found.entry.label}, ${new Date(found.entry.at).toLocaleString()}: its ${found.header} is ${ids.length === 1 ? ids[0] : 'the one in the log line'}`, 'ok');
 }
 
-/** How Trawl opens database `db` (family.js's projectAt): /azure-sql for Azure SQL without a login, else /add. Never a password. */
-export function trawlLine(db) {
-  const server = db.port && !(db.kind === 'sqlserver' && db.port === 1433) ? `${db.server}${db.kind === 'sqlserver' ? ',' : ':'}${db.port}` : db.server;
-  if (db.kind === 'sqlserver' && /\.database\.windows\.net$/i.test(db.server) && (!db.user || db.entra)) return shareLine('azure-sql', [server, ...(db.database ? [db.database] : [])]);
-  return shareLine('add', [db.name, server, ...(db.database ? [db.database] : []), ...(db.kind !== 'sqlserver' ? ['--kind', db.kind] : []), ...(db.user && !db.entra ? ['--user', db.user] : [])]);
-}
-
 /**
  * What this project offers the sibling apps, as the command lines to paste into them: { app, line, what }.
  * From the open file's folder and its checkout: Splice opens the checkout, Bosun runs the project when
@@ -650,15 +642,15 @@ export function familyOffers(dir) {
   const root = repoRoot(dir);
   const projects = [projectAt(dir), ...(root && root !== dir ? [projectAt(root)] : [])];
   const out = [];
-  if (root) out.push({ app: 'Splice', line: shareLine('open', [root]), what: 'the checkout' });
+  if (root) out.push({ app: 'splice', line: shareLine('open', [root]), what: 'the checkout' });
   const crew = projects.find((p) => p.crew);
-  if (crew) out.push({ app: 'Bosun', line: shareLine('move', [crew.dir]), what: 'run the project' });
+  if (crew) out.push({ app: 'bosun', line: shareLine('move', [crew.dir]), what: 'run the project' });
   const seen = new Set();
   for (const db of projects.flatMap((p) => p.databases)) {
     const key = [db.kind, db.server, db.port, db.database].join('|').toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ app: 'Trawl', line: trawlLine(db), what: `${db.name} (${db.source})` });
+    out.push({ app: 'trawl', line: trawlLine(db, db.name), what: `${db.name} (${db.source})` });
   }
   return out;
 }
@@ -671,10 +663,10 @@ export function family(ctx) {
   ctx.showPicker({
     title: 'For the sibling apps',
     hint: '↵ copy the command for it',
-    items: offers.map((o) => ({ ...o, segments: [{ text: o.app.padEnd(7), color: theme.accent, bold: true }, { text: `${o.what}  `, strong: true }, { text: o.line, color: theme.dim }] })),
+    items: offers.map((o) => ({ ...o, segments: [{ text: APP_NAMES[o.app].padEnd(7), color: theme.accent, bold: true }, { text: `${o.what}  `, strong: true }, { text: o.line, color: theme.dim }] })),
     onPick: (o) => {
-      ctx.copy(o.line, `a command for ${o.app}`);
-      ctx.note(`Copied for ${o.app}: paste it into ${o.app}'s prompt\n${o.line}`, 'ok');
+      ctx.copy(o.line, `a command for ${APP_NAMES[o.app]}`);
+      ctx.note(copiedNote(o.app, o.line), 'ok');
     },
   });
 }

@@ -5,8 +5,9 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { encodeContext, familyDir, writeMood } from '../src/family.js';
-import { familyOffers, trawlLine } from '../src/actions.js';
+import { encodeContext, familyDir, quoteArg, writeMood } from '../src/family.js';
+import { pathArg } from '../src/files.js';
+import { familyOffers } from '../src/actions.js';
 import { familyMood, reactionLine } from '../src/pet.js';
 import { KEYS, start, tempHome, until } from './helpers.js';
 
@@ -21,7 +22,7 @@ before(async () => {
   mkdirSync(join(dir, '.git'));
   mkdirSync(join(dir, 'api'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' } }));
-  writeFileSync(join(dir, 'api', 'appsettings.json'), JSON.stringify({ ConnectionStrings: { Shop: 'Server=tcp:shop.database.windows.net,1433;Database=Shop;Authentication=Active Directory Default', Local: 'Server=localhost,1444;Database=Dev;User ID=sa;Password=hunter2' } }));
+  writeFileSync(join(dir, 'api', 'appsettings.json'), JSON.stringify({ ConnectionStrings: { Shop: 'Server=tcp:shop.database.windows.net,1433;Database=Shop;Authentication=Active Directory Default', Local: 'Server=localhost,1444;Database=Dev;User ID=sa;Password=hunter2;TrustServerCertificate=True' } }));
   writeFileSync(join(dir, '.env'), 'DATABASE_URL=postgres://me:pw@db.local:5433/orders\n');
   writeFileSync(join(dir, 'api', 'api.http'), `### Ping\nGET http://127.0.0.1:${server.address().port}/ping\n`);
 });
@@ -34,14 +35,18 @@ after(() => {
 test('/family offers Splice the checkout, Bosun the project and Trawl each database, never a password', () => {
   const offers = familyOffers(join(dir, 'api'));
   assert.deepEqual(offers.map((o) => [o.app, o.line]), [
-    ['Splice', `/open ${dir}`],
-    ['Bosun', `/move ${dir}`],
-    ['Trawl', '/azure-sql shop.database.windows.net Shop'],
-    ['Trawl', '/add Local localhost,1444 Dev --user sa'],
-    ['Trawl', '/add DATABASE_URL db.local:5433 orders --kind postgres --user me'],
+    ['splice', `/open ${dir}`],
+    ['bosun', `/move ${dir}`],
+    ['trawl', '/azure-sql shop.database.windows.net Shop'],
+    ['trawl', '/add Local localhost,1444 Dev --user sa --trust-cert'],
+    ['trawl', '/add DATABASE_URL db.local:5433 orders --kind postgres --user me'],
   ]);
   assert.ok(offers.every((o) => !/hunter2|pw@/.test(o.line)));
-  assert.equal(trawlLine({ name: 'X', kind: 'sqlserver', server: 'x.database.windows.net', user: 'app', database: 'D', entra: false }), '/add X x.database.windows.net D --user app');
+});
+
+test("a file as a sibling's /open line quotes it, or as typed", () => {
+  for (const p of ['/w/my shop/api.http', 'C:\\work\\my shop\\api.http', '/plain.http']) assert.equal(pathArg(quoteArg(p)), p);
+  assert.equal(pathArg('"C:\\work\\api.http"'), 'C:\\work\\api.http', 'typed in quotes, backslashes kept');
 });
 
 test('Hoot\'s moods for the family, and his line about theirs', () => {
@@ -77,7 +82,7 @@ test('a pasted command or context opens the prompt with it, unrun, from the view
     app.stdin.write(`${ctx}\n`);
     await until(() => frame().includes(`> ${ctx.slice(0, 40)}`), 'the context in the prompt, not the search');
     app.stdin.write(KEYS.enter);
-    await until(() => frame().includes("That's for Splice"), 'it taken');
+    await until(() => frame().includes("That's commit abc123, for Splice or Sonar"), 'it taken');
     app.stdin.write('1');
     await until(() => frame().includes('↵ send · A send all'), 'Requests again');
     app.stdin.write('/');

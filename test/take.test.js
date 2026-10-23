@@ -101,7 +101,7 @@ test('/take request replays it against the environment, picked and ready to send
     await until(() => seen.some((s) => s.url === '/orders/42?full=1'), 'it sent to the local server');
     // Another app's kind says whose it is.
     await run(app, encodeContext('commit', { hash: 'abc' }));
-    await until(() => frame().includes("That's for Splice"), 'whose it is');
+    await until(() => frame().includes("That's commit abc, for Splice or Sonar: paste it into one's prompt instead."), 'whose it is');
   } finally {
     app.unmount();
   }
