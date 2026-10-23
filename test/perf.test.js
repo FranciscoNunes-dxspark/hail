@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { basePaths, findOperation } from '../src/contract.js';
 import { readHistory } from '../src/history.js';
 import { send } from '../src/send.js';
 import { highlight, highlightLines, parseHttpFile } from '../src/http-file.js';
@@ -164,4 +165,38 @@ test("a pane's first rows of a body are the whole body's first rows, worked out 
       assert.deepEqual(responseLines(sent, width, { rows: 3 }), all.slice(0, all.length - whole.length + 3).slice(0, all.length));
     }
   }
+});
+
+test("an operation is found as matching every path's expression in turn finds it", () => {
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const templateRe = (template) => ({
+    re: new RegExp(`^${template.replace(/\/+$/, '').split(/(\{[^}]+\})/).map((part) => (/^\{[^}]+\}$/.test(part) ? '[^/]+' : escapeRe(part))).join('')}/?$`),
+    params: (template.match(/\{[^}]+\}/g) ?? []).length,
+  });
+  // findOperation as it was, every template made into an expression on every call.
+  const slow = (spec, method, url) => {
+    let path;
+    try {
+      path = decodeURI(new URL(url).pathname) || '/';
+    } catch {
+      path = '/';
+    }
+    const m = method.toLowerCase();
+    for (const base of basePaths(spec)) {
+      if (base && !(path === base || path.startsWith(`${base}/`))) continue;
+      const rest = path.slice(base.length) || '/';
+      const hits = Object.keys(spec.paths).map((template) => ({ template, ...templateRe(template) })).filter((t) => t.re.test(rest) || (rest === '/' && t.template === '/')).sort((a, b) => a.params - b.params);
+      if (!hits.length) continue;
+      const hit = hits.find((h) => spec.paths[h.template]?.[m]) ?? hits[0];
+      return { path: hit.template, method: m.toUpperCase(), op: spec.paths[hit.template]?.[m] ?? null };
+    }
+    return null;
+  };
+  const ok = { responses: {} };
+  const spec = {
+    servers: [{ url: 'https://api.example.com/v1' }],
+    paths: { '/': { get: ok }, '/users': { get: ok }, '/users/': { post: ok }, '/users/{id}': { get: ok }, '/users/me': { get: ok }, '/users/{id}/posts/{post}': { get: ok }, '/files/{name}.{ext}': { get: ok }, '/a+b/(c)': { get: ok }, '/v1': { get: ok }, '{all}': { get: ok } },
+  };
+  const urls = ['/', '/v1', '/v1/', '/users', '/users/', '/users/7', '/users/me', '/users/7/posts/3', '/v1/users/7', '/files/a.txt', '/files/a', '/a+b/(c)', '/ab/c', '/nothing/here', '/users/7/', '/x%20y'];
+  for (const url of urls) for (const method of ['GET', 'POST', 'DELETE']) assert.deepEqual(findOperation(spec, method, `http://h${url}`), slow(spec, method, `http://h${url}`), `${method} ${url}`);
 });

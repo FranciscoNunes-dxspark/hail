@@ -80,6 +80,15 @@ function templateRe(template) {
   return { re: new RegExp(`^${body || ''}/?$`), params };
 }
 
+// The paths' templates as expressions, made once per spec (a big one has thousands, and every
+// response is matched against them).
+const TEMPLATES = new WeakMap();
+const templatesOf = (paths) => {
+  // `prefix`: the text before its first parameter, which a path it matches starts with.
+  if (!TEMPLATES.has(paths)) TEMPLATES.set(paths, Object.keys(paths).map((template) => ({ template, prefix: template.replace(/\/+$/, '').split('{')[0], ...templateRe(template) })));
+  return TEMPLATES.get(paths);
+};
+
 /** The path of `url` (a whole URL or one starting with /), decoded where it can be. */
 function pathOf(url) {
   let p;
@@ -105,9 +114,8 @@ export function findOperation(spec, method, url) {
   for (const base of basePaths(spec)) {
     if (base && !(path === base || path.startsWith(`${base}/`))) continue;
     const rest = path.slice(base.length) || '/';
-    const hits = Object.keys(spec.paths)
-      .map((template) => ({ template, ...templateRe(template) }))
-      .filter((t) => t.re.test(rest) || (rest === '/' && t.template === '/'))
+    const hits = templatesOf(spec.paths)
+      .filter((t) => (rest.startsWith(t.prefix) && t.re.test(rest)) || (rest === '/' && t.template === '/'))
       .sort((a, b) => a.params - b.params);
     if (!hits.length) continue;
     const withMethod = hits.find((h) => spec.paths[h.template]?.[m]);
