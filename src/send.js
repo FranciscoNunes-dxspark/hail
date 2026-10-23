@@ -1,6 +1,7 @@
 // Turning a parsed request into what goes over the wire, sending it, and showing what came back.
 import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
+import { callSignal } from './run.js';
 import { graphqlBody, isGraphql, multipartBoundary, multipartParts, multipartPayload } from './bodies.js';
 import { transport } from './transport.js';
 import { fill } from './variables.js';
@@ -96,15 +97,11 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
   let bytes;
   let redirects = 0;
   let way = { proxy: null, insecure: false };
-  // fetch keeps a listener on the signal it's given until the request is garbage collected, so a run
-  // of many sharing one (/load's) piles thousands up, and Node warns on the terminal. Each request has
-  // a signal of its own instead, tied to `signal` only while it's on its way.
-  const own = signal ? new AbortController() : null;
-  const stop = () => own.abort(signal.reason);
-  if (signal?.aborted) stop();
-  else signal?.addEventListener('abort', stop, { once: true });
+  // A signal of its own, tied to `signal` only while it's on its way: a run of many sharing one
+  // (/load's) would otherwise pile thousands of fetch's listeners on it, and Node warns on the terminal.
+  const own = callSignal(signal);
   const timer = timeout ? AbortSignal.timeout(timeout) : null;
-  const both = timer && own ? AbortSignal.any([own.signal, timer]) : (timer ?? own?.signal);
+  const both = timer && own.signal ? AbortSignal.any([own.signal, timer]) : (timer ?? own.signal);
   try {
     for (;;) {
       const cookie = jar && !has(headers, 'cookie') ? jar.header(url) : '';
@@ -139,7 +136,7 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     if (timer?.aborted) throw new Error(`${new URL(url).host} didn't answer within ${timeout >= 1000 ? `${timeout / 1000} s` : `${timeout} ms`} (# @timeout)`);
     throw new Error(networkError(e, url, way));
   } finally {
-    signal?.removeEventListener('abort', stop);
+    own.done();
   }
   return {
     status: res.status,
