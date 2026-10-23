@@ -6,6 +6,7 @@ export const COMMANDS = [
   { name: 'send', args: '[request|all]', desc: 'Send a request (the one picked in Requests if none is named); all sends every one, top to bottom, and shows a report', complete: 'requests', run: (ctx, s) => a.send(ctx, s) },
   { name: 'env', args: '[name]', desc: 'The environment the variables come from (a list to pick from if none is named)', complete: 'environments', run: (ctx, s) => a.chooseEnvironment(ctx, s) },
   { name: 'curl', args: '[request]', desc: 'Copy a request, filled in, as a curl command', complete: 'requests', run: (ctx, s) => a.copyCurl(ctx, s) },
+  { name: 'import-curl', args: '<curl command>', desc: 'Add a request to the file from a curl command (a browser\'s Copy as cURL, from any shell)', run: (ctx, s) => a.importCurl(ctx, s) },
   { name: 'find', args: '<text>', desc: 'Find text in the file, in the Edit view (n and N go on to the next and the one before)', run: (ctx, s) => ctx.findInEditor(s) },
   { name: 'open', args: '<file.http>', desc: 'Open another .http file', complete: 'files', run: (ctx, s) => a.open(ctx, s) },
   { name: 'new', args: '[file.http]', desc: 'Write an example .http file to start from (requests.http) and open it', run: (ctx, s) => a.newFile(ctx, s) },

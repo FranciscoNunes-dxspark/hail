@@ -52,7 +52,7 @@ const CTRL_P = '\x10';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
-  requests: '↵ send · A send all · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
+  requests: '↵ send · A send all · I import curl · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
   edit: '↵ or i type · ctrl+r send · ctrl+s save · ctrl+z undo · ctrl+f find · [ ] requests · c copy as curl',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
   history: '↵ show it · d compare with the one before · D forget them all',
@@ -138,6 +138,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // client.global.set's variables: kept for the open file until another is opened or Hail closes.
   const globalsRef = useRef({});
   const selectedRef = useRef(0);
+  // Counts goToRequest's jumps, so the Requests view moves its cursor even while it's on screen.
+  const [jump, setJump] = useState(0);
   const fileRef = useRef(initialFile ?? null);
   // The responses kept for the open file, oldest first (history.js), and the file they're kept in.
   const [history, setHistory] = useState([]);
@@ -456,6 +458,24 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // The global variables response handlers set (client.global.set), for the open file while Hail runs.
     globals: () => globalsRef.current,
     setGlobals: (g) => (globalsRef.current = g),
+    // Requests added to the end of the file (/import-curl), as typing them in Edit would: saved at once,
+    // undone with ctrl+z. Resolves with the index of the first one added, or -1 with no file open.
+    appendRequests: (block) => {
+      if (!dataRef.current) return -1;
+      const before = dataRef.current.requests.length;
+      const cur = ed.toText(editorRef.current);
+      const sep = !cur.trim() ? '' : cur.endsWith('\n\n') ? '' : cur.endsWith('\n') ? '\n' : '\n\n';
+      const next = ed.fromText(cur + sep + block);
+      setEditor({ ...next, row: (cur + sep).split('\n').length - 1, col: 0 });
+      saveEditor();
+      return before;
+    },
+    // Puts the Requests view's cursor on request `i`, on screen.
+    goToRequest: (i) => {
+      selectedRef.current = i;
+      setJump((n) => n + 1);
+      setView('requests');
+    },
     // The views say which request the cursor is on, so commands and the Response view act on it.
     selectRequest: (i) => (selectedRef.current = i),
     selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
@@ -977,7 +997,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     const request = ctx.selectedRequest();
     main = <ResponseView request={request} sent={request ? responses[request.label] : null} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else {
-    main = <RequestsView data={data} responses={responses} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+    main = <RequestsView data={data} responses={responses} jump={jump} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   }
 
   const left = flash

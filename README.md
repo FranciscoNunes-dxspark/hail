@@ -85,6 +85,18 @@ copies the selection and `ctrl+x` cuts it (with nothing selected, the line). A d
 copies it. `alt+↑`/`alt+↓` move the line, or the selected lines, up or down; `ctrl+d` writes it again
 under itself; `ctrl+/` comments it out with `#` or back in; `tab` and `shift+tab` indent selected lines.
 
+### Importing curl
+
+`/import-curl <command>` (or `I` in Requests, which starts it for you to paste into) turns a curl command
+into a request at the end of the file, named after its method and path (`### POST /v1/users`), and puts
+the cursor on it. It reads what a browser's "Copy as cURL" gives in any shell: bash's quoting and `\`
+at line ends, Windows cmd's `^` escapes, PowerShell's backticks, and the lines run together as a paste
+into the prompt has them. `-X`, `-H`, `-d` and the other `--data` forms (`@file` becomes a body file),
+`--json`, `-u user:password` (an `Authorization: Basic` header), `-F` (a multipart body, files as `< path`
+lines), `-G`, `-I`, `-A`, `-e`, `-b` and `-m` (`# @timeout`) carry over; options about how curl itself
+runs (`--compressed`, `-L`, `-s`, `-o`…) are dropped, and the ones that mean something Hail does
+another way (`-k`) are named when it's added.
+
 ### Variables
 
 `{{name}}` in the URL, the headers or the body. Values come from, first to last:
@@ -198,6 +210,7 @@ that defines the routes.
 | `i` | Edit the file, typing, on the request under the cursor |
 | `ctrl+r` | In Edit: send the request the cursor is in |
 | `c` | Copy the request as a curl command, variables filled in |
+| `I` | In Requests: import a curl command (starts `/import-curl ` for you to paste after) |
 | `y` | Copy the request's URL; in Response, the body |
 | `v` | The response, the whole width |
 | `h` | In Response: show or hide the headers |
@@ -253,6 +266,7 @@ and Trawl.
 | `/send [request]` | Send a request by name (the one under the cursor if none is named); `/send all` sends every one and shows a report |
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
+| `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |
 | `/open <file.http>` | Open another file |
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
 | `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |

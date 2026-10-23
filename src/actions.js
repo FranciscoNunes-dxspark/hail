@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { clip, draftPrompt, parseDraft } from './claude.js';
 import { configFile } from './config.js';
+import { curlToHttp, parseCurl } from './curl.js';
 import { changedOnly, lineDiff } from './diff.js';
 import { writeExample } from './files.js';
 import { previousOf } from './history.js';
@@ -288,6 +289,28 @@ export async function draft(ctx, rest) {
   if (!d) await ctx.openFile(target);
   else await ctx.reload();
   ctx.note(`Added ${answer.requests.length} request${answer.requests.length === 1 ? '' : 's'} to ${basename(target)}`, 'ok');
+}
+
+/**
+ * /import-curl <command> (I in Requests): a curl command line, as a browser's "Copy as cURL" gives it in
+ * any shell, added to the end of the file as a request named after its method and path, and picked.
+ */
+export async function importCurl(ctx, text) {
+  if (!text.trim()) return ctx.prefill('/import-curl ');
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  let parsed;
+  try {
+    parsed = parseCurl(text);
+  } catch (e) {
+    return ctx.note(e.message, 'error');
+  }
+  const block = curlToHttp(parsed);
+  const at = ctx.appendRequests(block);
+  if (at < 0) return;
+  ctx.goToRequest(at);
+  const title = block.split('\n')[0].replace(/^###\s*/, '');
+  const left = parsed.ignored.length ? `\nLeft out: ${parsed.ignored.join(', ')}${parsed.ignored.includes('-k') ? ' (an environment\'s "SSLConfiguration": { "verifyHostCertificate": false } skips checking certificates)' : ''}` : '';
+  ctx.note(`Added ${title} to ${ctx.data.name}${left}`, 'ok');
 }
 
 /** e and /env: the environment the variables come from, named or picked from a list. */
