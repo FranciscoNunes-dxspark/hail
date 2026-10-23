@@ -15,7 +15,7 @@ export function wrapIndented(line, width) {
 
 export const statusColour = (status) => (status < 300 ? theme.add : status < 400 ? theme.info : status < 500 ? theme.warn : theme.del);
 
-export const METHOD_COLOURS = { GET: '#5fafff', POST: '#5fd75f', PUT: '#ffaf5f', PATCH: '#d7af5f', DELETE: '#ff5f5f' };
+export const METHOD_COLOURS = { GET: '#5fafff', POST: '#5fd75f', PUT: '#ffaf5f', PATCH: '#d7af5f', DELETE: '#ff5f5f', GRAPHQL: '#d787ff' };
 export const methodColour = (method) => METHOD_COLOURS[method] ?? theme.dim;
 
 /** The request as written in the file: its line, headers and body, variables unfilled. */

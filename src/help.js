@@ -97,6 +97,14 @@ export const HELP = [
     ],
   },
   {
+    title: 'Bodies',
+    rows: [
+      ['< ./body.json', 'The body from a file, as it is (<@ fills in its variables)'],
+      ['multipart', 'Content-Type: multipart/form-data; boundary=X, then --X lines between parts, each with its headers, a blank line and its value\na part\'s value can be < ./photo.png, sent byte for byte · --X-- ends it'],
+      ['GRAPHQL url', 'A GraphQL query as the body, then its variables as a JSON object after a blank line; sent as a POST of { query, variables }\n(X-REQUEST-TYPE: GraphQL on a POST does the same)'],
+    ],
+  },
+  {
     title: 'Cookies and directives',
     about: "cookies kept as a browser keeps them; directives are comments before a request's line or among its headers",
     rows: [

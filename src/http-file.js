@@ -14,7 +14,8 @@
 // file) is left out. Comments like `# @no-redirect` before the request line or among the headers are
 // directives, kept in `options`.
 
-export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT'];
+// GRAPHQL is JetBrains': a GraphQL query, POSTed as JSON (bodies.js).
+export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT', 'GRAPHQL'];
 
 const SEPARATOR = /^###/;
 const COMMENT = /^\s*(#|\/\/)/;
@@ -137,33 +138,59 @@ function withPlaceholders(text, kind) {
 
 /**
  * The text as lines of runs ({ text, kind }) for the editor to colour, read as parseHttpFile reads
- * it: separator, comment, variable (an @name), method, url, version, header, value, body, file (a
- * body from a file), handler (a response handler, left out) and placeholder ({{...}}). Plain text
- * has no kind.
+ * it: separator, comment, directive (# @no-redirect and the like), variable (an @name), method, url,
+ * version, header, value, body, file (a body from a file, or one in a multipart part), boundary (a
+ * multipart body's --boundary lines), keyword (a GraphQL query's operation), handler (a response
+ * handler) and placeholder ({{...}}). Plain text has no kind.
  */
 export function highlight(text) {
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-  // Where in its request each line is: before the request line, the query lines, headers, body.
+  // Where in its request each line is: before the request line, the query lines, headers, body. In
+  // the body, a multipart boundary and whether the line is among a part's headers; a GraphQL query.
   let state = 'pre';
+  let boundary = null;
+  let partHeaders = false;
+  let graphql = false;
+  const comment = (l) => [{ text: l, kind: /^\s*(#|\/\/)\s*@[a-z]/i.test(l) && !NAME.test(l) ? 'directive' : 'comment' }];
+  const headerRuns = (l) => {
+    const h = /^(\s*[^:\s][^:]*?)(\s*:\s*)(.*)$/.exec(l);
+    return h ? [...withPlaceholders(h[1], 'header'), { text: h[2] }, ...withPlaceholders(h[3], 'value')] : withPlaceholders(l, undefined);
+  };
   const runs = lines.map((l) => {
     if (SEPARATOR.test(l)) {
       state = 'pre';
+      boundary = null;
+      graphql = false;
       return [{ text: l, kind: 'separator' }];
     }
-    if (state === 'handler') return [{ text: l, kind: 'handler' }];
-    if (state === 'body' && (/^\s*>\s*(\{%|\S)/.test(l) || /^\s*<>/.test(l))) {
+    if (state === 'handler') return [{ text: l, kind: /^\s*>>!?\s/.test(l) || /^\s*>\s*[^\s{>]/.test(l) ? 'file' : 'handler' }];
+    if (state === 'body' && (HANDLER.test(l) || /^\s*<>/.test(l))) {
       state = 'handler';
-      return [{ text: l, kind: 'handler' }];
+      return [{ text: l, kind: /^\s*>>!?\s/.test(l) || /^\s*>\s*[^\s{>]/.test(l) ? 'file' : 'handler' }];
     }
-    if (state === 'body') return /^\s*<@?\s+\S/.test(l) ? [{ text: l, kind: 'file' }] : withPlaceholders(l, undefined);
+    if (state === 'body') {
+      if (boundary && (l.trim() === `--${boundary}` || l.trim() === `--${boundary}--`)) {
+        partHeaders = l.trim() === `--${boundary}`;
+        return [{ text: l, kind: 'boundary' }];
+      }
+      if (partHeaders) {
+        if (!l.trim()) partHeaders = false;
+        else return headerRuns(l);
+      }
+      if (/^\s*<@?\s+\S/.test(l)) return [{ text: l, kind: 'file' }];
+      const op = graphql ? /^(\s*)(query|mutation|subscription|fragment)\b(.*)$/.exec(l) : null;
+      if (op) return [{ text: op[1] }, { text: op[2], kind: 'keyword' }, ...withPlaceholders(op[3], undefined)];
+      return withPlaceholders(l, undefined);
+    }
     if (state === 'query' && !/^\s*[?&]/.test(l)) state = 'headers';
-    if (COMMENT.test(l)) return [{ text: l, kind: 'comment' }];
+    if (COMMENT.test(l)) return comment(l);
     if (state === 'pre') {
       const variable = /^(\s*@)([A-Za-z_][\w.-]*)(\s*=\s*)(.*)$/.exec(l);
       if (variable) return [{ text: variable[1] + variable[2], kind: 'variable' }, { text: variable[3], kind: 'comment' }, ...withPlaceholders(variable[4], undefined)];
       const m = l.trim() ? REQUEST_LINE.exec(l) : null;
       if (!m) return withPlaceholders(l, undefined);
       state = 'query';
+      graphql = (m[1] ?? '').toUpperCase() === 'GRAPHQL';
       const runs = [];
       const method = /^(\s*)([A-Za-z]+)(\s+)/.exec(l);
       let rest = l;
@@ -182,8 +209,10 @@ export function highlight(text) {
       state = 'body';
       return [{ text: l }];
     }
-    const h = /^(\s*[^:\s][^:]*?)(\s*:\s*)(.*)$/.exec(l);
-    return h ? [...withPlaceholders(h[1], 'header'), { text: h[2] }, ...withPlaceholders(h[3], 'value')] : withPlaceholders(l, undefined);
+    const h = HEADER.exec(l);
+    if (h && /^content-type$/i.test(h[1])) boundary = /^\s*multipart\//i.test(h[2]) ? (/boundary\s*=\s*"?([^";]+)"?/i.exec(h[2])?.[1]?.trim() ?? null) : null;
+    if (h && /^x-request-type$/i.test(h[1]) && /^graphql$/i.test(h[2])) graphql = true;
+    return headerRuns(l);
   });
   return runs.map((line) => line.filter((r) => r.text));
 }

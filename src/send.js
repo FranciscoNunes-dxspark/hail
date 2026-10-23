@@ -1,16 +1,20 @@
 // Turning a parsed request into what goes over the wire, sending it, and showing what came back.
 import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
+import { graphqlBody, isGraphql, multipartBoundary, multipartParts, multipartPayload } from './bodies.js';
 import { transport } from './transport.js';
 import { fill } from './variables.js';
 
 /**
- * The request with every placeholder filled in: { method, url, headers, body, missing, secrets,
- * handlers }, `missing` being the variables nothing answered and `secrets` the secret values and
- * tokens filled in. A body from a file is read relative to the .http file's `dir`, and so is a response
- * handler's script file; `handlers` are the scripts to run on the response ([{ script, name }]).
+ * The request with every placeholder filled in: { method, url, headers, body, payload, missing,
+ * secrets, handlers, options }, `missing` being the variables nothing answered and `secrets` the secret
+ * values and tokens filled in. A body from a file is read relative to the .http file's `dir`, and so are
+ * a multipart body's files and a response handler's script file; `handlers` are the scripts to run on
+ * the response ([{ script, name }]). `payload`, when there is one, is what's sent in place of `body`
+ * (the bytes of a multipart body, its files in it, or of a body file), `body` staying the text to show
+ * and keep. A GraphQL request becomes the POST of { query, variables } as JSON.
  */
-export async function prepare(request, scope, { dir = process.cwd(), read = (p) => readFile(p, 'utf8') } = {}) {
+export async function prepare(request, scope, { dir = process.cwd(), read = (p) => readFile(p, 'utf8'), readBytes = (p) => readFile(p) } = {}) {
   const missing = [];
   const used = new Set();
   const inner = { ...scope, env: { ...scope?.env, used } };
@@ -19,25 +23,43 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
     missing.push(...r.missing);
     return r.text;
   };
+  const at = (path) => (isAbsolute(path) ? path : join(dir, path));
+  const reading = (how, what) => async (path) => {
+    try {
+      return await how(at(path));
+    } catch (e) {
+      throw new Error(`Couldn't read ${what} ${path}: ${e.code === 'ENOENT' ? "there's no such file" : e.message}`);
+    }
+  };
   const url = await f(request.url);
-  const headers = [];
+  let method = request.method;
+  let headers = [];
   for (const [k, v] of request.headers) headers.push([await f(k), await f(v)]);
   let body = await f(request.body);
+  let payload;
   if (request.bodyFile) {
     const path = await f(request.bodyFile.path);
-    const text = await read(isAbsolute(path) ? path : join(dir, path));
+    const text = await reading(read, 'the body file')(path);
     body = request.bodyFile.fill ? await f(text) : text;
+    if (!request.bodyFile.fill && !isGraphql(method, headers)) payload = await reading(readBytes, 'the body file')(path);
   }
-  const at = (path) => (isAbsolute(path) ? path : join(dir, path));
+  const boundary = multipartBoundary(headers);
+  if (boundary && body) payload = await multipartPayload(body, { readBytes: reading(readBytes, 'the file'), readText: reading(read, 'the file'), fill: f });
+  if (isGraphql(method, headers)) {
+    if (method === 'GRAPHQL') method = 'POST';
+    headers = headers.filter(([k]) => k.toLowerCase() !== 'x-request-type');
+    if (!headers.some(([k]) => k.toLowerCase() === 'content-type')) headers.push(['Content-Type', 'application/json']);
+    body = JSON.stringify(graphqlBody(body));
+  }
   const handlers = [];
   for (const h of request.handlers ?? []) {
     if (h.script != null) handlers.push({ script: h.script, name: `the script on line ${h.line}` });
     else {
       const path = await f(h.file);
-      handlers.push({ script: await read(at(path)), name: basename(path) });
+      handlers.push({ script: await reading(read, 'the response handler')(path), name: basename(path) });
     }
   }
-  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used], handlers, options: request.options ?? {} };
+  return { method, url, headers, body, ...(payload ? { payload } : {}), missing: [...new Set(missing)], secrets: [...used], handlers, options: request.options ?? {} };
 }
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
@@ -162,12 +184,21 @@ export function formatSize(n) {
 
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
-/** The prepared request as a curl command line (POSIX shell quoting), for pasting elsewhere. */
-export function toCurl(req) {
+/**
+ * The prepared request as a curl command line (POSIX shell quoting), for pasting elsewhere. A multipart
+ * body becomes -F fields (curl makes its own boundary), its files `@path` relative to `dir`.
+ */
+export function toCurl(req, { dir } = {}) {
   const parts = ['curl'];
   if (req.method !== 'GET') parts.push('-X', req.method);
   parts.push(quote(req.url));
-  for (const [k, v] of req.headers) parts.push('-H', quote(`${k}: ${v}`));
-  if (req.body && !['GET', 'HEAD'].includes(req.method)) parts.push('--data-raw', quote(req.body));
+  const boundary = multipartBoundary(req.headers);
+  for (const [k, v] of req.headers) if (!(boundary && k.toLowerCase() === 'content-type')) parts.push('-H', quote(`${k}: ${v}`));
+  if (boundary) {
+    for (const p of multipartParts(req.body, boundary)) {
+      const extra = `${p.type ? `;type=${p.type}` : ''}${p.filename && p.file && p.filename !== basename(p.file) ? `;filename=${p.filename}` : ''}`;
+      parts.push('-F', quote(p.file ? `${p.name}=@${dir && !isAbsolute(p.file) ? join(dir, p.file) : p.file}${extra}` : `${p.name}=${p.value}${p.type ? `;type=${p.type}` : ''}`));
+    }
+  } else if (req.body && !['GET', 'HEAD'].includes(req.method)) parts.push('--data-raw', quote(req.body));
   return parts.join(' ');
 }

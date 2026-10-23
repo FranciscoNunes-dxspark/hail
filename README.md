@@ -53,14 +53,50 @@ a GET), the headers, a blank line, and the body. A body can come from a file: `<
 `<@ ./body.json` with its variables filled in. Query lines under the URL (`?page=2`, `&size=10`) are
 joined onto it. After the body, a response handler can check what comes back (see [Checking responses](#checking-responses)).
 
+A multipart form is written out as JetBrains writes it, and a part can take a file, sent byte for byte
+(images and all); `<@` fills in the file's variables first:
+
+```http
+### Upload a photo
+POST {{host}}/photos
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="title"
+
+Holidays
+--WebAppBoundary
+Content-Disposition: form-data; name="photo"; filename="beach.png"
+Content-Type: image/png
+
+< ./beach.png
+--WebAppBoundary--
+```
+
+GraphQL, also as JetBrains has it: the `GRAPHQL` method (or `X-REQUEST-TYPE: GraphQL` on a POST), the
+query as the body, and, after a blank line, a JSON object of its variables. It's sent as the POST of
+`{ "query": …, "variables": … }`.
+
+```http
+### A hero
+GRAPHQL {{host}}/graphql
+
+query Hero($id: ID!) {
+  hero(id: $id) { name }
+}
+
+{ "id": "{{heroId}}" }
+```
+
 Hail reads the file again whenever it's saved, so it can sit beside your editor, or you can edit it
 in Hail itself.
 
 ### Editing the file
 
 The Edit tab (`2`, or `i` on a request in Requests) is the file itself in an editor inside Hail, as
-Trawl's SQL console is: `###` lines, comments, `@variables`, methods, URLs, headers and `{{placeholders}}`
-each in a colour of their own. Press `↵` or `i` to start typing and `esc` to stop. While you type, every
+Trawl's SQL console is: `###` lines, comments, directives, `@variables`, methods, URLs, headers,
+`{{placeholders}}`, multipart boundaries and files, GraphQL's `query` and `mutation`, and response
+handlers each in a colour of their own. Press `↵` or `i` to start typing and `esc` to stop. While you type, every
 key is text, so the digits and `q` don't switch views or quit. `ctrl+r` sends the request the cursor is
 in (the gutter marks it), as it is on screen, and its response shows beside the text, so you can keep
 typing. A click starts typing where it lands.
@@ -239,7 +275,7 @@ that defines the routes.
 | `A` | In Requests: send every request, top to bottom, and show a report |
 | `i` | Edit the file, typing, on the request under the cursor |
 | `ctrl+r` | In Edit: send the request the cursor is in |
-| `c` | Copy the request as a curl command, variables filled in |
+| `c` | Copy the request as a curl command, variables filled in (a multipart form as `-F` fields) |
 | `I` | In Requests: import a curl command (starts `/import-curl ` for you to paste after) |
 | `y` | Copy the request's URL; in Response, the body |
 | `v` | The response, the whole width |

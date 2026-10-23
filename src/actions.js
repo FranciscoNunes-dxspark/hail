@@ -156,7 +156,7 @@ export async function copyCurl(ctx, which) {
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note('Pick a request first.', 'error');
   const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
-  if (req) ctx.copy(toCurl(req), 'it as curl');
+  if (req) ctx.copy(toCurl(req, { dir: ctx.data.dir }), 'it as curl');
 }
 
 /**

@@ -20,8 +20,11 @@ const COLORS = () => ({
   header: theme.info,
   value: undefined,
   file: theme.info,
-  handler: theme.dim,
+  handler: theme.add,
   placeholder: theme.warn,
+  directive: theme.bangMode,
+  boundary: theme.accent,
+  keyword: theme.bangMode,
 });
 const KIND_COLORS = () => ({ environment: theme.warn, file: theme.info, response: theme.add, builtin: theme.bangMode, header: theme.info, value: undefined });
 const MENU_ROWS = 8;
@@ -357,7 +360,7 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
     let x = 0;
     for (const run of lines[i] ?? []) {
       const color = run.kind === 'method' ? methodColour(run.text.toUpperCase()) : colors[run.kind];
-      const bold = run.kind === 'method' || run.kind === 'separator';
+      const bold = run.kind === 'method' || run.kind === 'separator' || run.kind === 'keyword' || run.kind === 'boundary';
       for (const ch of run.text) {
         if (x >= left.current && x < left.current + textW) {
           const cursor = editing && i === editor.row && x === editor.col;
