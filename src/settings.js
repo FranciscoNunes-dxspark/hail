@@ -2,6 +2,7 @@
 // without the UI; actions.js shows it in a picker and makes the changes.
 import { THEMES, defaultAccent, theme } from './theme.js';
 import { fit } from './text.js';
+import { notifySeconds } from './notify.js';
 
 const isOn = (value) => value !== false;
 
@@ -42,6 +43,13 @@ export function settingRows(config, { file = '', mouse = true } = {}) {
       label: 'Install them by itself',
       value: isOn(config.autoUpdate) ? 'on' : 'off',
       note: checks ? 'they start the next time you open Hail' : 'only while checking is on',
+      action: 'toggle',
+    },
+    {
+      id: 'notify',
+      label: 'Notify when done',
+      value: isOn(config.notify) ? 'on' : 'off',
+      note: isOn(config.notify) ? `a bell and a notification when a request takes over ${notifySeconds(config)} s` : 'say nothing when a long request ends',
       action: 'toggle',
     },
     { id: 'history', label: 'Prompt history', value: count(history.length, 'entry', 'entries'), note: history.length ? 'clear it' : '', action: history.length ? 'clear' : 'none' },

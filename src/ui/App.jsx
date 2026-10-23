@@ -15,6 +15,7 @@ import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
+import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
@@ -126,7 +127,9 @@ const DOUBLE_CLICK_MS = 400;
 // terminalMouse() from cli.jsx (missing where the terminal can't report it); tests pass their own.
 // `copy` puts text on the clipboard (cli.jsx's; tests pass a stub). `checkUpdate` and `installUpdate`
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy }) {
+// `notify(title, body)` says a long run has finished (cli.jsx rings the terminal's bell and raises a
+// desktop notification); tests pass a recorder or nothing.
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -390,15 +393,19 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     setBusy(b);
     const id = addEntry({ title, status: 'running' });
     setWelcome(false);
+    // A long run that ends says so, for when you've looked away (Settings' "Notify when done").
+    const tell = (line) => notify && worthNotifying(Date.now() - b.started, configRef.current) && notify(`Hail: ${title}`, line);
     try {
       const { stdout = '', stderr = '' } = await start(controller.signal);
       const out = [stdout.trimEnd(), stderr.trimEnd()].filter(Boolean).join('\n');
       lastOutput.current = { title, text: out || '(no output)' };
       updateEntry(id, { status: 'ok', lines: out ? out.split('\n') : ['Done'] });
+      tell(firstLine(out) || 'Done');
       return { ok: true, out };
     } catch (error) {
       lastOutput.current = { title, text: error.message };
       updateEntry(id, { status: 'error', lines: error.cancelled ? ['Cancelled'] : error.message.split('\n') });
+      if (!error.cancelled) tell(firstLine(error.message));
       return { ok: false, error };
     } finally {
       busyRef.current = null;

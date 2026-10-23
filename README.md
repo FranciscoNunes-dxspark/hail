@@ -350,7 +350,7 @@ and Trawl.
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
-| `/settings` | Accent colour, theme, mouse, updates, history |
+| `/settings` | Accent colour, theme, mouse, updates, notifications, history |
 | `/accent <#rrggbb>` | Change the accent colour (`default` puts it back) |
 | `/update` | Look for a new version now and install it |
 | `/help` | Keys and commands |
@@ -368,6 +368,7 @@ picked for each file, the files opened lately and the names (never the values) o
 | Mouse | Off leaves selecting text to the terminal |
 | Check for new versions | Once a day, in the downloaded builds |
 | Install them by itself | Off only says a new version is out |
+| Notify when done | When a request (or `/send all`, or anything else with the spinner) takes over 10 seconds, Hail rings the terminal's bell and asks it for a desktop notification saying what finished and how (OSC 9, which Windows Terminal, iTerm2, WezTerm and kitty show, or OSC 777 in GNOME Terminal and other VTE terminals), for when you've switched to another window. A run you cancel says nothing. `"notifyAfter": 30` in `config.json` changes the seconds |
 | Prompt history | Clear it |
 
 ## License
