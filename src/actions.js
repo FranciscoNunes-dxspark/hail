@@ -13,7 +13,9 @@ import { previousOf } from './history.js';
 import { run } from './run.js';
 import { checkSummary } from './checks.js';
 import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
-import { formatSize, prepare, prettyBody, toCurl } from './send.js';
+import { loadReport, loadStats, loadSummary, parseLoadArgs, runLoad } from './load.js';
+import { formatSize, prepare, prettyBody, send as sendRequest, toCurl } from './send.js';
+import { parseTimeout } from './transport.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
@@ -148,10 +150,59 @@ export async function sendAll(ctx) {
   const cancelled = done.error?.cancelled;
   const left = requests.slice(results.length);
   const lines = reportLines(results, { left, stopped: stopped || cancelled });
-  const tones = { add: theme.add, del: theme.del, dim: theme.dim, warn: theme.warn };
-  ctx.showText(`Sent all: ${ctx.data.name}${ctx.environment() ? ` · ${ctx.environment()}` : ''}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), {
-    lines: lines.map((segs) => segs.map(({ text, tone, status, bold }) => ({ text, bold, color: status ? statusColour(status) : tones[tone] }))),
-  });
+  ctx.showText(`Sent all: ${ctx.data.name}${ctx.environment() ? ` · ${ctx.environment()}` : ''}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
+}
+
+/** A report's lines (runner.js's or load.js's segments, by tone) in the viewer's colours. */
+const toned = (lines) => {
+  const tones = { add: theme.add, del: theme.del, dim: theme.dim, warn: theme.warn, accent: theme.accent };
+  return lines.map((segs) => segs.map(({ text, tone, status, bold }) => ({ text, bold, color: status ? statusColour(status) : tones[tone] })));
+};
+
+/**
+ * /load [request] [count] [concurrency] (L in Requests): the request, its variables filled in once, sent
+ * `count` times, `concurrency` at a time, through the same send as ↵ but without the cookie jar, its
+ * response handlers or >> saving, and nothing kept in the history. The spinner counts them; esc stops it
+ * and reports what finished. Up to 5,000 requests, 100 at a time.
+ */
+export async function load(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const args = parseLoadArgs(rest);
+  if (args.problem) return ctx.note(args.problem, 'error');
+  const request = requestNamed(ctx, args.name);
+  if (!request) return ctx.note(args.name ? `There's no request called ${args.name}.` : 'The file has no requests yet.', 'error');
+  const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
+  if (!req) return;
+  const { count, concurrency } = args;
+  const options = req.options ?? {};
+  const insecure = ctx.environmentOptions().insecure;
+  let run = null;
+  let shownAt = 0;
+  const done = await ctx.task(
+    `Load ${request.label}: ${count} × ${concurrency} at a time`,
+    async (signal) => {
+      run = await runLoad({
+        count,
+        concurrency,
+        signal,
+        sendOne: (s) => sendRequest(req, { signal: s, jar: null, follow: !options['no-redirect'], timeout: parseTimeout(options.timeout), insecure }),
+        onProgress: (results) => {
+          // The spinner says how far it's got, at most ten times a second.
+          if (Date.now() - shownAt < 100 && results.length < count) return;
+          shownAt = Date.now();
+          const errors = results.filter((r) => r.error).length;
+          ctx.setBusyLabel(`Load: ${results.length}/${count}${errors ? ` · ${errors} error${errors === 1 ? '' : 's'}` : ''}`);
+        },
+      });
+      return { stdout: loadSummary(loadStats(run), { count, cancelled: run.cancelled }) };
+    },
+    { label: `Load: 0/${count}` },
+  );
+  if (!done.ok || !run?.results.length) return;
+  const stats = loadStats(run);
+  const lines = loadReport(stats, { label: `${req.method} ${request.label}`, count, concurrency, cancelled: run.cancelled });
+  ctx.showText(`Load: ${request.label}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
+  return { stats };
 }
 
 /** c in Requests, and /curl: the request, filled in, as a curl command on the clipboard. */

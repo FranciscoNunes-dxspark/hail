@@ -27,6 +27,8 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
     if (key.return) send(ctx, sel);
     else if (input === 'c') copyCurl(ctx, sel);
     else if (input === 'y') ctx.copy(sel.url);
+    // /load, for you to change the numbers before ↵.
+    else if (input === 'L') ctx.prefill(`/load ${sel.name ?? sel.label} 200 10`);
     // The Edit view, typing, with the cursor on this request.
     else if (input === 'i') {
       ctx.setView('edit');

@@ -222,6 +222,20 @@ does; on a build server, `{{$processEnv NAME}}` is usually the way to hand it a 
 checked against the file's contract (see [Contract drift](#contract-drift)); `--contract-strict` makes
 drift fail the run too.
 
+### Load in a pinch
+
+`/load [request] [count] [concurrency]` (or `L` in Requests, which starts it for you with the request
+under the cursor) sends one request `count` times (200 unless said), `concurrency` at a time (10), to
+see how an endpoint holds up: not a load-testing tool, but enough to tell whether it falls over at 50
+at once. `count=` and `concurrency=` (or `n=` and `c=`) say which number is which. Its variables are
+filled in once, and it goes out as `↵` sends it (the environment's certificates and proxy,
+`# @no-redirect` and `# @timeout`), but without the cookie jar, response handlers or `>>` saving. The
+spinner counts them as they come back; `esc` stops it and reports what had finished. Then the report:
+how long it took and how many requests a second, the latency's p50, p90, p95, p99, maximum and mean, a
+sparkline of the latency over the run, how many came back with each status, and the errors (no answer,
+out of time) counted by kind. None of it is kept in the history, which stays the responses you sent
+yourself; the summary line stays in the Log. Up to 5,000 requests, 100 at a time.
+
 ### Contract drift
 
 `/contract openapi.yaml` (or a `.json` file, or a URL) checks every response to the open file's
@@ -302,6 +316,7 @@ that defines the routes.
 | `1` `2` `3` `4` `5` / `tab` | Requests, Edit, Response, History, Log (`shift+tab` goes back) |
 | `↵` | Send the request under the cursor; in Response, send it again; in Edit, start typing |
 | `A` | In Requests: send every request, top to bottom, and show a report |
+| `L` | In Requests: load in a pinch (starts `/load <request> 200 10` for you to change and run) |
 | `i` | Edit the file, typing, on the request under the cursor |
 | `ctrl+r` | In Edit: send the request the cursor is in |
 | `c` | Copy the request as a curl command, variables filled in (a multipart form as `-F` fields) |
@@ -359,6 +374,7 @@ and Trawl.
 | Command | What it does |
 | --- | --- |
 | `/send [request]` | Send a request by name (the one under the cursor if none is named); `/send all` sends every one and shows a report |
+| `/load [request] [count] [concurrency]` | Send a request many times, so many at once (200, 10 at a time, unless said), and report how it held up |
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
 | `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |

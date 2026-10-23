@@ -55,7 +55,7 @@ const CTRL_P = '\x10';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
-  requests: '↵ send · A send all · I import curl · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
+  requests: '↵ send · A send all · L load · I import curl · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
   edit: '↵ or i type · ctrl+r send · ctrl+s save · ctrl+z undo · ctrl+f find · [ ] requests · c copy as curl',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
   history: '↵ show it · d compare with the one before · D forget them all',
@@ -437,6 +437,13 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     }
   };
 
+  // What the spinner says, changed while the task runs (/load's count).
+  const setBusyLabel = (label) => {
+    if (!busyRef.current) return;
+    busyRef.current = { ...busyRef.current, label };
+    setBusy(busyRef.current);
+  };
+
   const confirm = (req) =>
     new Promise((done) => {
       const full = { options: [{ label: 'Yes', value: true }, { label: 'No', value: false }], ...req, id: nextId.current++, done };
@@ -466,6 +473,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const ctx = ctxRef.current;
   Object.assign(ctx, {
     task,
+    setBusyLabel,
     openFile,
     environment,
     setEnvironment: (name) => {

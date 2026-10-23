@@ -36,6 +36,7 @@ export const HELP = [
       ['A', 'Send them all, top to bottom (/send all), and show a report: each one\'s status, time and tests'],
       ['c', 'Copy it as a curl command, variables filled in'],
       ['I', 'Import a curl command (/import-curl): paste it, ↵ adds it to the file as a request'],
+      ['L', 'Load in a pinch: starts /load <it> 200 10 (count, then how many at once) for you to change and ↵\nlatency percentiles, requests a second, statuses, errors and a sparkline over time · esc stops it'],
       ['y', 'Copy its URL'],
       ['i', 'Edit the file, typing, on this request'],
       ['v', 'The response, the whole width'],
