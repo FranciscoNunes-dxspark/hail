@@ -11,7 +11,8 @@
 // A body can come from a file instead: `< ./body.json` as it is, `<@ ./body.json` with its variables
 // filled in. After the body, JetBrains' response handlers: `> {% ... %}` (a script, which may run over
 // several lines) or `> ./checks.js`, run on what comes back (checks.js). `<> ...` (an earlier response
-// file) is left out. Comments like `# @no-redirect` before the request line or among the headers are
+// file) is left out. `>> ./out.json` saves the response's body to a file (a new name if it's there
+// already), `>>! ./out.json` over it. Comments like `# @no-redirect` before the request line or among the headers are
 // directives, kept in `options`.
 
 // GRAPHQL is JetBrains': a GraphQL query, POSTed as JSON (bodies.js).
@@ -39,7 +40,7 @@ function directive(l, options) {
 /**
  * The file's variables and requests: { variables: { name: value }, requests: [{ index, name, label,
  * method, url, headers: [[name, value]], body, bodyFile: { path, fill }, handlers: [{ script | file,
- * line }], options, line }] }. `line` is where the request line is (from 1); `label` is what a list
+ * line }], output: { path, overwrite }, options, line }] }. `line` is where the request line is (from 1); `label` is what a list
  * shows: the name, else the method and URL. `options` holds the directives (`{ 'no-redirect': true }`).
  */
 export function parseHttpFile(text) {
@@ -93,10 +94,16 @@ export function parseHttpFile(text) {
       if (HANDLER.test(lines[i]) || /^\s*<>/.test(lines[i])) break;
       rest.push(lines[i]);
     }
-    // After it: the handlers.
+    // After it: the handlers, and where to save the response.
     const handlers = [];
+    let output = null;
     for (; i < end; i++) {
       const l = lines[i];
+      const save = /^\s*>>(!?)\s*(\S.*?)\s*$/.exec(l);
+      if (save) {
+        output = { path: save[2], overwrite: save[1] === '!' };
+        continue;
+      }
       const script = /^\s*>\s*\{%(.*)$/.exec(l);
       if (script) {
         const line = i + 1;
@@ -118,7 +125,7 @@ export function parseHttpFile(text) {
       body = '';
     }
     const index = requests.length;
-    requests.push({ index, name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile, handlers, options });
+    requests.push({ index, name, label: name ?? `${request.method} ${request.url}`, ...request, headers, body, bodyFile, handlers, output, options });
   });
   return { variables, requests };
 }

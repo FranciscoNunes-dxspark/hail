@@ -10,7 +10,8 @@ import { fill } from './variables.js';
  * secrets, handlers, options }, `missing` being the variables nothing answered and `secrets` the secret
  * values and tokens filled in. A body from a file is read relative to the .http file's `dir`, and so are
  * a multipart body's files and a response handler's script file; `handlers` are the scripts to run on
- * the response ([{ script, name }]). `payload`, when there is one, is what's sent in place of `body`
+ * the response ([{ script, name }]), `output` where to save its body ({ path, shown, overwrite }, from
+ * `>> path`). `payload`, when there is one, is what's sent in place of `body`
  * (the bytes of a multipart body, its files in it, or of a body file), `body` staying the text to show
  * and keep. A GraphQL request becomes the POST of { query, variables } as JSON.
  */
@@ -59,7 +60,12 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
       handlers.push({ script: await reading(read, 'the response handler')(path), name: basename(path) });
     }
   }
-  return { method, url, headers, body, ...(payload ? { payload } : {}), missing: [...new Set(missing)], secrets: [...used], handlers, options: request.options ?? {} };
+  let output = null;
+  if (request.output) {
+    const path = await f(request.output.path);
+    output = { path: at(path), shown: path, overwrite: request.output.overwrite };
+  }
+  return { method, url, headers, body, ...(payload ? { payload } : {}), missing: [...new Set(missing)], secrets: [...used], handlers, output, options: request.options ?? {} };
 }
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);

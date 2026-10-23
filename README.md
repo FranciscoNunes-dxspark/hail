@@ -191,6 +191,14 @@ globals last until Hail closes or another file is opened. Scripts run in a sandb
 `require`, no `process`, no timers, no files, nothing from Hail but the response, and two seconds to
 finish. The tests are kept in the history with the response.
 
+### Saving a response
+
+`>> ./out.json` after a request (after its handler, if it has one) saves the body of what comes back to
+that file, beside the `.http` file unless the path says otherwise, byte for byte, so an image or a zip
+comes out whole. Folders on the way are made. As in JetBrains, a file that's there already is kept and the
+body goes to `out-1.json`, then `out-2.json`; `>>! ./out.json` writes over it instead. Variables work in
+the path (`>> ./exports/{{date}}.csv`). Where it went shows with the response.
+
 ### Sending the whole file
 
 `A` in Requests (or `/send all`) sends every request in the file, top to bottom, each one using what the

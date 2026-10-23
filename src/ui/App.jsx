@@ -348,7 +348,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         const entries = readHistory(hf);
         historyRef.current = { file: hf, entries };
         setHistory(entries);
-        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at, checks: e.checks }]));
+        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at, checks: e.checks, saved: e.saved }]));
         setResponses(responsesRef.current);
       }
     } catch (e) {
@@ -491,14 +491,14 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     selectRequest: (i) => (selectedRef.current = i),
     selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
     selectedIndex: () => selectedRef.current,
-    // `extra`: { checks } (how its response handlers went).
+    // `extra`: { checks, saved } (how its response handlers went, where >> saved its body).
     setResponse: (request, sentAs, response, extra = {}) => {
       const at = Date.now();
       responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at, ...extra } };
       setResponses(responsesRef.current);
       const h = historyRef.current;
       if (!h.file) return;
-      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks });
+      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks, saved: extra.saved });
       historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
       setHistory(historyRef.current.entries);
     },

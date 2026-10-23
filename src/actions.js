@@ -71,15 +71,16 @@ async function prepared(ctx, request) {
 async function exchangeFor(ctx, request, req, signal) {
   const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure });
   ctx.setGlobals(out.globals);
-  ctx.setResponse(request, req, out.response, { checks: out.checks });
+  ctx.setResponse(request, req, out.response, { checks: out.checks, saved: out.saved });
   return out;
 }
 
 /** What a response says in the activity lines: its status, time and size, and how its tests went. */
-function responseSummary({ response: res, checks }) {
+function responseSummary({ response: res, checks, saved }) {
   const summary = checkSummary(checks);
   const failed = (checks?.tests ?? []).filter((t) => !t.passed).map((t) => `✗ ${t.name}`);
-  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...failed, ...(checks?.error ? [checks.error] : [])].join('\n');
+  const save = saved?.error ?? (saved ? `Saved to ${saved.shown}` : null);
+  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : [])].join('\n');
 }
 
 /** ↵ in Requests, and /send: sends it, and shows what came back. `/send all` sends every one. */
@@ -217,6 +218,7 @@ export function entryLines(entry) {
     ...(q.body ? [[], ...q.body.split('\n').map((l) => [{ text: l }])] : []),
     [],
     [{ text: `${r.status} ${r.statusText}`, bold: true, color: r.status < 400 ? theme.add : theme.del }, { text: `  ${r.ms} ms · ${formatSize(r.size)} · ${new Date(entry.at).toLocaleString()}`, color: theme.dim }],
+    ...(entry.saved ? [[{ text: entry.saved.error ?? `Saved to ${entry.saved.shown}`, color: entry.saved.error ? theme.del : theme.dim }]] : []),
     ...checkLines(entry.checks),
     ...r.headers.map(([k, v]) => [{ text: `${k}: `, color: theme.dim }, { text: v }]),
     [],

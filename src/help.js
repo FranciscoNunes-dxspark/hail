@@ -125,6 +125,7 @@ export const HELP = [
       ['client.global.set(n, v)', 'A variable {{n}} for the requests after it (over the environment\'s); client.global.get(n) reads it'],
       ['client.log(…)', 'A line under the response'],
       ['response', '.status · .body (parsed when JSON) · .headers.valueOf(name) · .contentType.mimeType'],
+      ['>> ./out.json', 'After a request: save the body of its response to that file (out-1.json when it\'s there); >>! writes over it'],
       ['hail test api.http', 'From the shell: send them all, print the report, exit 1 if anything failed (--env picks the environment)'],
     ],
   },

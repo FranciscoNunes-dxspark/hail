@@ -23,7 +23,7 @@ const blank = (text, secrets) => secrets.reduce((t, s) => (s && s.length >= 4 ? 
  * blanked out everywhere (what the response handlers logged too), credential headers hidden, and a
  * body over MAX_BODY cut (`truncated` set).
  */
-export function entryFor({ label, name, at, request, response, checks }) {
+export function entryFor({ label, name, at, request, response, checks, saved }) {
   const secrets = request.secrets ?? [];
   const headers = (list) => list.map(([k, v]) => [k, SENSITIVE.test(k) ? HIDDEN : blank(v, secrets)]);
   const body = blank(response.body, secrets);
@@ -51,6 +51,7 @@ export function entryFor({ label, name, at, request, response, checks }) {
           error: checks.error ? blank(checks.error, secrets) : null,
         }
       : undefined,
+    saved: saved ? (saved.error ? { error: blank(saved.error, secrets) } : { path: blank(saved.path, secrets), shown: blank(saved.shown, secrets) }) : undefined,
   };
 }
 
