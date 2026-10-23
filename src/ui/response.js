@@ -53,6 +53,10 @@ export function responseLines(sent, width, { headers = false } = {}) {
     ],
   ];
   if (r.url !== sent.request.url) out.push([{ text: `→ ${r.url}`, color: theme.dim }]);
+  const location = r.status >= 300 && r.status < 400 ? r.headers.find(([k]) => k.toLowerCase() === 'location')?.[1] : null;
+  if (location) out.push([{ text: `Redirects to ${location} (not followed: # @no-redirect)`, color: theme.dim }]);
+  if (r.insecure) out.push([{ text: '⚠ The certificate wasn\'t checked (the environment\'s SSLConfiguration)', color: theme.warn }]);
+  if (r.proxy) out.push([{ text: `Through the proxy ${r.proxy}`, color: theme.dim }]);
   out.push(...checkLines(sent.checks));
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);

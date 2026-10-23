@@ -1,6 +1,7 @@
 // Turning a parsed request into what goes over the wire, sending it, and showing what came back.
 import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
+import { transport } from './transport.js';
 import { fill } from './variables.js';
 
 /**
@@ -48,9 +49,11 @@ const has = (headers, name) => headers.some(([k]) => k.toLowerCase() === name);
  * body, raw, ms, size, url, redirects }; `url` is where it ended up after redirects, `raw` the body's
  * bytes. Redirects are followed here rather than by fetch, so that a cookie `jar` (cookies.js) sees
  * the Set-Cookie of every response on the way and sends its cookies to each hop, unless the request
- * sets Cookie itself. `follow: false` gives back the redirect itself. `signal` cancels it.
+ * sets Cookie itself. `follow: false` gives back the redirect itself. `signal` cancels it; `timeout`
+ * (milliseconds) gives up waiting. `insecure` skips checking https certificates, and the proxy comes
+ * from `env`'s HTTPS_PROXY and the like (transport.js); the response says so (`insecure`, `proxy`).
  */
-export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now(), jar = null, follow = true } = {}) {
+export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now(), jar = null, follow = true, timeout = null, insecure = false, env = process.env } = {}) {
   let url;
   try {
     url = new URL(req.url).href;
@@ -64,15 +67,20 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
   let res;
   let bytes;
   let redirects = 0;
+  let way = { proxy: null, insecure: false };
+  const timer = timeout ? AbortSignal.timeout(timeout) : null;
+  const both = timer && signal ? AbortSignal.any([signal, timer]) : (timer ?? signal);
   try {
     for (;;) {
       const cookie = jar && !has(headers, 'cookie') ? jar.header(url) : '';
+      way = await transport(url, { insecure, env });
       res = await fetch(url, {
         method,
         headers: cookie ? [...headers, ['Cookie', cookie]] : headers,
         body: body && body.length && !['GET', 'HEAD'].includes(method) ? body : undefined,
         redirect: 'manual',
-        signal,
+        signal: both,
+        ...way.init,
       });
       jar?.store(res.headers.getSetCookie?.() ?? [], url);
       const location = res.headers.get('location');
@@ -93,7 +101,8 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     bytes = Buffer.from(await res.arrayBuffer());
   } catch (e) {
     if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-    throw new Error(networkError(e, url));
+    if (timer?.aborted) throw new Error(`${new URL(url).host} didn't answer within ${timeout >= 1000 ? `${timeout / 1000} s` : `${timeout} ms`} (# @timeout)`);
+    throw new Error(networkError(e, url, way));
   }
   return {
     status: res.status,
@@ -105,12 +114,16 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     size: bytes.length,
     url,
     redirects,
+    ...(way.insecure ? { insecure: true } : {}),
+    ...(way.proxy ? { proxy: way.proxy } : {}),
   };
 }
 
 /** What went wrong reaching `url`, in words: fetch only says "fetch failed" and keeps the reason in `cause`. */
-export function networkError(e, url) {
+export function networkError(e, url, way = {}) {
   const c = e.cause ?? e;
+  if (c.code === 'EPROXY') return `Couldn't reach ${url}: ${c.message}`;
+  if (way.proxy && c.code === 'ECONNREFUSED') return `Couldn't reach ${url}: nothing is listening at the proxy ${way.proxy} (HTTPS_PROXY / HTTP_PROXY)`;
   const host = new URL(url).host;
   const why = {
     ECONNREFUSED: `nothing is listening at ${host}`,
@@ -122,7 +135,7 @@ export function networkError(e, url) {
   if (why) return `Couldn't reach ${url}: ${why}`;
   // fetch refuses the ports browsers block (SMTP's, IRC's and the like), before trying them.
   if (c.message === 'bad port') return `Couldn't reach ${url}: port ${new URL(url).port} is one that browsers and fetch refuse to use`;
-  if (/certificate|CERT_|SSL/i.test(`${c.code} ${c.message}`)) return `Couldn't reach ${url}: its certificate isn't trusted (${c.code ?? c.message})`;
+  if (/certificate|CERT_|SSL/i.test(`${c.code} ${c.message}`)) return `Couldn't reach ${url}: its certificate isn't trusted (${c.code ?? c.message}); an environment's "SSLConfiguration": { "verifyHostCertificate": false } skips the check`;
   return `Couldn't reach ${url}: ${c.message ?? e.message}`;
 }
 

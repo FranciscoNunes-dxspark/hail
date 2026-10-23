@@ -107,7 +107,7 @@ export async function runTests(args, { print = console.log, printError = console
       continue;
     }
     try {
-      const out = await exchange(req, { globals, jar });
+      const out = await exchange(req, { globals, jar, insecure: data.environments.options(env).insecure });
       globals = out.globals;
       if (request.name) responses[request.name] = out.response;
       results.push({ request, response: out.response, checks: out.checks });

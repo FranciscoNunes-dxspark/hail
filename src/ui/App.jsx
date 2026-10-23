@@ -458,6 +458,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         env: { azToken, secret: (name) => credentials.get(name) },
       };
     },
+    // The environment's settings (environments.js's options): { insecure }.
+    environmentOptions: () => dataRef.current?.environments.options?.(environment()) ?? {},
     // The cookies kept for the open file in the environment picked.
     cookieJar: () => {
       const key = `${dataRef.current?.path ?? ''}\n${environment() ?? ''}`;

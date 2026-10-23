@@ -6,17 +6,31 @@ import { join } from 'node:path';
 
 export const ENV_FILES = ['http-client.env.json', 'http-client.private.env.json'];
 
-/** The environments in `files` (parsed JSON, later ones over earlier): { names, vars(name) }. */
+// Not variables: settings of the environment, as JetBrains has them.
+const SETTINGS = new Set(['SSLConfiguration']);
+
+/**
+ * The environments in `files` (parsed JSON, later ones over earlier): { names, vars(name), options(name) },
+ * `options` being the environment's settings: { insecure } from "SSLConfiguration": { "verifyHostCertificate": false }.
+ */
 export function environmentsFrom(files) {
   const all = files.filter((f) => f && typeof f === 'object');
   const names = [...new Set(all.flatMap((f) => Object.keys(f).filter((k) => k !== '$shared' && f[k] && typeof f[k] === 'object')))];
   const vars = (name) => {
     const out = {};
     for (const f of all) Object.assign(out, f.$shared, name ? f[name] : undefined);
-    for (const k of Object.keys(out)) if (out[k] != null && typeof out[k] === 'object') out[k] = JSON.stringify(out[k]);
+    for (const k of Object.keys(out)) {
+      if (SETTINGS.has(k)) delete out[k];
+      else if (out[k] != null && typeof out[k] === 'object') out[k] = JSON.stringify(out[k]);
+    }
     return out;
   };
-  return { names, vars };
+  const options = (name) => {
+    const ssl = {};
+    for (const f of all) Object.assign(ssl, f.$shared?.SSLConfiguration, name ? f[name]?.SSLConfiguration : undefined);
+    return { insecure: ssl.verifyHostCertificate === false };
+  };
+  return { names, vars, options };
 }
 
 /** The environments beside a .http file in `dir`. A file that isn't JSON is an error naming it. */

@@ -41,6 +41,8 @@ export function entryFor({ label, name, at, request, response, checks }) {
       ms: response.ms,
       size: response.size,
       url: blank(response.url, secrets),
+      ...(response.insecure ? { insecure: true } : {}),
+      ...(response.proxy ? { proxy: response.proxy } : {}),
     },
     checks: checks
       ? {

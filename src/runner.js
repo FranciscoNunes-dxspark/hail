@@ -3,16 +3,26 @@
 // which is pure.
 import { runChecks } from './checks.js';
 import { send } from './send.js';
+import { parseTimeout } from './transport.js';
 
 /**
  * Sends `req` (send.js's prepare) and runs its handlers. Resolves with { response, checks, globals }:
  * `checks` is null without handlers, `globals` the global variables afterwards (from `globals`).
- * `jar` keeps cookies (cookies.js) unless the request says `# @no-cookie-jar`. Throws what send throws
- * (no answer, cancelled).
+ * `jar` keeps cookies (cookies.js) unless the request says `# @no-cookie-jar`; `# @no-redirect` and
+ * `# @timeout 30` are the request's too, and `insecure` (the environment's SSLConfiguration) skips
+ * checking certificates. Throws what send throws (no answer, cancelled, out of time).
  */
-export async function exchange(req, { signal, globals = {}, fetch, jar = null } = {}) {
+export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env } = {}) {
   const options = req.options ?? {};
-  const { raw: _, ...response } = await send(req, { signal, fetch, jar: options['no-cookie-jar'] ? null : jar });
+  const { raw: _, ...response } = await send(req, {
+    signal,
+    fetch,
+    jar: options['no-cookie-jar'] ? null : jar,
+    follow: !options['no-redirect'],
+    timeout: parseTimeout(options.timeout),
+    insecure,
+    env,
+  });
   let checks = null;
   let after = globals;
   if (req.handlers?.length) {

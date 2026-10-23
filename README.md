@@ -185,6 +185,26 @@ environment, in memory only: nothing about them is written anywhere, and the his
 `Cookie` and `Set-Cookie` headers. `/cookies` lists them, `/cookies clear` forgets them, and
 `# @no-cookie-jar` above a request (JetBrains') keeps that one out of it: it sends none and keeps none.
 
+### Directives, certificates and proxies
+
+Comment lines above a request's line (or among its headers) can change how it's sent, as in JetBrains:
+
+| Directive | |
+| --- | --- |
+| `# @no-redirect` | Show a redirect (its status and where it points) rather than follow it |
+| `# @timeout 30` | Give up waiting after 30 seconds; `500 ms` and `2 m` work too |
+| `# @no-cookie-jar` | Neither send the jar's cookies nor keep the ones it gets |
+
+Certificates are checked, unless the environment says otherwise, as JetBrains has it:
+`"SSLConfiguration": { "verifyHostCertificate": false }` inside an environment (in either env file, or
+`$shared`) skips the check for its requests, for a server with a certificate of its own making. A response
+that came back without the check says so in yellow.
+
+Requests go through the proxy that `HTTPS_PROXY` (for https) or `HTTP_PROXY` (for http) names, as curl
+does, `user:password@` in it included, except to hosts `NO_PROXY` lists (names, `.domain`s, `*`, and
+`10.0.0.0/8`-style ranges) and to this machine, which never goes through one. The response says which
+proxy it went through.
+
 ### History
 
 Every response is kept, across runs, in `~/.hail/history` (one file per `.http` file). When a file is

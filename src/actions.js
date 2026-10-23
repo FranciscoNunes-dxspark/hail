@@ -69,7 +69,7 @@ async function prepared(ctx, request) {
 
 /** Sends a filled-in request with what the session holds for it, and keeps what came back. */
 async function exchangeFor(ctx, request, req, signal) {
-  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar() });
+  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure });
   ctx.setGlobals(out.globals);
   ctx.setResponse(request, req, out.response, { checks: out.checks });
   return out;

@@ -102,6 +102,10 @@ export const HELP = [
     rows: [
       ['cookies', 'Set-Cookie is kept per file and environment while Hail runs, and sent on to the same site (unless the request sets Cookie)\n/cookies lists them · /cookies clear forgets them · redirects are followed with them'],
       ['# @no-cookie-jar', "This request neither sends the jar's cookies nor keeps the ones it gets"],
+      ['# @no-redirect', 'Show a redirect rather than follow it'],
+      ['# @timeout 30', 'Give up after 30 seconds (or 500 ms, 2 m)'],
+      ['SSLConfiguration', 'In an environment: "SSLConfiguration": { "verifyHostCertificate": false } skips checking certificates (the response says so)'],
+      ['HTTPS_PROXY', 'HTTPS_PROXY, HTTP_PROXY and NO_PROXY in the environment send requests through a proxy (never for this machine)'],
     ],
   },
   {
