@@ -96,3 +96,26 @@ test('a response handler\'s tests show with the response, its globals feed later
     app.unmount();
   }
 });
+
+test('A over many requests redraws as it goes, not once a response, and every response shows at the end', async () => {
+  const many = join(dir, 'many.http');
+  writeFileSync(many, `@host = http://127.0.0.1:${server.address().port}\n\n${Array.from({ length: 60 }, (_, i) => `### n${i}\nGET {{host}}/n${i}\n`).join('\n')}`);
+  const app = start({ initialFile: many });
+  const frame = () => app.lastFrame() ?? '';
+  let frames = 0;
+  const write = app.stdout.write.bind(app.stdout);
+  app.stdout.write = (s) => (frames++, write(s));
+  try {
+    await until(() => frame().includes('n0'), 'the requests');
+    const before = frames;
+    app.stdin.write('A');
+    await until(() => frame().includes('60 requests sent'), 'the report');
+    assert.ok(frames - before < 60, `${frames - before} frames for 60 responses`);
+    app.stdin.write(KEYS.esc);
+    await until(() => /GET\s+200 n0/.test(frame()), 'the first response in the list');
+    app.stdin.write('4');
+    await until(() => frame().includes('60 kept'), 'all of them kept');
+  } finally {
+    app.unmount();
+  }
+});

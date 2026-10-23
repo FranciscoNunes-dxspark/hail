@@ -54,6 +54,8 @@ const helpSections = (user, keymap) => [...HELP, ...[keymapSection(keymap, VIEW_
 
 // ctrl+p, as the terminal sends it: the command palette.
 const CTRL_P = '\x10';
+// How often responses coming one after another redraw the screen, in milliseconds.
+const SHOW_EVERY = 100;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
@@ -459,6 +461,25 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     }
   };
 
+  // A response on screen at once, and while they come quicker than that (A sends a file's worth) at
+  // most every SHOW_EVERY ms, so a run isn't spent redrawing; the last always shows. What the screen
+  // gets is the refs as they are then.
+  const shownAt = useRef(0);
+  const showTimer = useRef(null);
+  const showResponses = () => {
+    if (showTimer.current) return;
+    const show = () => {
+      showTimer.current = null;
+      shownAt.current = Date.now();
+      setResponses(responsesRef.current);
+      setHistory(historyRef.current.entries);
+    };
+    const wait = shownAt.current + SHOW_EVERY - Date.now();
+    if (wait <= 0) show();
+    else showTimer.current = setTimeout(show, wait);
+  };
+  useEffect(() => () => clearTimeout(showTimer.current), []);
+
   // What the spinner says, changed while the task runs (/load's count).
   const setBusyLabel = (label) => {
     if (!busyRef.current) return;
@@ -586,12 +607,12 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     setResponse: (request, sentAs, response, extra = {}) => {
       const at = Date.now();
       responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at, ...extra } };
-      setResponses(responsesRef.current);
       const h = historyRef.current;
-      if (!h.file) return;
-      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks, saved: extra.saved });
-      historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
-      setHistory(historyRef.current.entries);
+      if (h.file) {
+        const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks, saved: extra.saved });
+        historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
+      }
+      showResponses();
     },
     history: () => historyRef.current.entries,
     // The History view, its cursor on `entry`, and the entry shown.
