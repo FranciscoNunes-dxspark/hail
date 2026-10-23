@@ -20,7 +20,7 @@ import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
 import { contextIn, describeContext } from './family.js';
-import { OWNERS, hostVariable, replayBlock } from './takes.js';
+import { OWNERS, hostVariable, replayBlock, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -526,6 +526,7 @@ export async function take(ctx, rest) {
   const c = contextIn(text);
   if (!c) return ctx.note("That isn't something a sibling app copied (they start family:v1:).", 'error');
   if (c.kind === 'request') return takeRequest(ctx, c.data);
+  if (c.kind === 'rows') return takeRows(ctx, c.data);
   const owner = OWNERS[c.kind];
   return ctx.note(`That's for ${owner ?? 'another app'}: paste it into ${owner ?? 'its'}'s prompt (${describeContext(c)}).`, 'error');
 }
@@ -570,6 +571,39 @@ async function takeRequest(ctx, data) {
     onPick: (it) => {
       ctx.closeOverlay();
       add(it.useHost);
+    },
+  });
+}
+
+/**
+ * /take rows: rows Trawl copied ({ columns, rows, table? }) as a JSON body (an array of objects, or one
+ * object for one row): a new POST request, to {{host}}/<table> when the table is known, or the body of
+ * the request under the cursor replaced. Either goes through the editor, so ctrl+z in Edit undoes it.
+ */
+function takeRows(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  if (!Array.isArray(data?.columns) || !Array.isArray(data?.rows) || !data.rows.length) return ctx.note('Those rows are empty.', 'error');
+  const n = data.rows.length;
+  const what = `${n} row${n === 1 ? '' : 's'}${data.table ? ` of ${data.table}` : ''}`;
+  const hostVar = environmentHost(ctx) ?? 'host';
+  const sel = ctx.selectedRequest();
+  const items = [{ how: 'new', segments: [{ text: 'A new POST request', strong: true }, { text: `  POST {{${hostVar}}}/${tablePath(data.table)}`, color: theme.dim }] }];
+  if (sel) items.push({ how: 'replace', segments: [{ text: `The body of ${sel.label}`, strong: true }, { text: '  replaced', color: theme.dim }] });
+  ctx.showPicker({
+    title: `${what} as a JSON body`,
+    hint: '↵ put it there',
+    items,
+    onPick: (it) => {
+      ctx.closeOverlay();
+      if (it.how === 'replace') {
+        if (!ctx.replaceRequestBody(sel, rowsJson(data))) return;
+        ctx.note(`Put ${what} in the body of ${sel.label}: ctrl+z in Edit undoes it`, 'ok');
+        return ctx.goToRequest(sel.index);
+      }
+      const at = ctx.appendRequests(rowsRequestBlock(data, { hostVar }));
+      if (at < 0) return;
+      ctx.goToRequest(at);
+      ctx.note(`Added a POST of ${what} to ${ctx.data.name}: ctrl+z in Edit undoes it`, 'ok');
     },
   });
 }

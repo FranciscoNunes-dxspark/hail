@@ -105,3 +105,37 @@ test('/take request replays it against the environment, picked and ready to send
     app.unmount();
   }
 });
+
+test('/take rows: a new POST of them, or the body of the request under the cursor, undone with ctrl+z', async () => {
+  const file = join(dir, 'rows.http');
+  writeFileSync(file, '### Orders\nPOST {{host}}/orders\n\n{ "old": true }\n');
+  const app = start({ initialFile: file });
+  const frame = () => app.lastFrame() ?? '';
+  const rows = { table: 'dbo.Orders', columns: ['id', 'name'], rows: [[1, 'a'], [2, 'b']] };
+  try {
+    await until(() => frame().includes('Orders'), 'the requests');
+    await run(app, takeLine('rows', rows));
+    await until(() => frame().includes('2 rows of dbo.Orders as a JSON body'), 'the question');
+    app.stdin.write(KEYS.down);
+    await new Promise((r) => setTimeout(r, 50));
+    app.stdin.write(KEYS.enter);
+    await until(() => frame().includes('Put 2 rows of dbo.Orders in the body of Orders'), 'the body replaced');
+    assert.equal(readFileSync(file, 'utf8'), '### Orders\nPOST {{host}}/orders\nContent-Type: application/json\n\n[\n  {\n    "id": 1,\n    "name": "a"\n  },\n  {\n    "id": 2,\n    "name": "b"\n  }\n]\n');
+    app.stdin.write(KEYS.enter);
+    await until(() => seen.some((s) => s.url === '/orders' && s.body.includes('"name": "b"')), 'the rows sent');
+    app.stdin.write('2');
+    await until(() => frame().includes('Edit') && frame().includes('"id": 1'), 'the Edit view');
+    app.stdin.write('\x1a');
+    await until(() => frame().includes('"old": true'), 'the old body back');
+    // ctrl+z saves after a moment, as typing does.
+    await until(() => readFileSync(file, 'utf8') === '### Orders\nPOST {{host}}/orders\n\n{ "old": true }\n', 'ctrl+z saved');
+    app.stdin.write('1');
+    await run(app, takeLine('rows', { ...rows, rows: [[3, 'c']] }));
+    await until(() => frame().includes('1 row of dbo.Orders as a JSON body'), 'the question again');
+    app.stdin.write(KEYS.enter);
+    await until(() => /POST Orders/.test(frame()) && frame().includes('Added a POST'), 'the new request');
+    assert.match(readFileSync(file, 'utf8'), /### POST Orders\nPOST \{\{host\}\}\/Orders\nContent-Type: application\/json\n\n\{\n {2}"id": 3,\n {2}"name": "c"\n\}\n$/);
+  } finally {
+    app.unmount();
+  }
+});

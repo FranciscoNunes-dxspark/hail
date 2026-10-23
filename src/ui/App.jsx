@@ -17,6 +17,7 @@ import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
 import { checkContract, loadContract } from '../contract.js';
 import { contextIn } from '../family.js';
+import { replaceBody } from '../takes.js';
 import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
@@ -541,6 +542,15 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       setEditor({ ...next, row: (cur + sep).split('\n').length - 1, col: 0 });
       saveEditor();
       return before;
+    },
+    // The body of `request` replaced by `body` (takes.js's replaceBody), as typing it in Edit would:
+    // saved at once, undone with ctrl+z. False with no file open.
+    replaceRequestBody: (request, body) => {
+      if (!dataRef.current) return false;
+      const r = replaceBody(editorRef.current.lines, request.line, body);
+      setEditor({ lines: r.lines, row: r.row, col: 0 });
+      saveEditor();
+      return true;
     },
     // Puts the Requests view's cursor on request `i`, on screen.
     goToRequest: (i) => {

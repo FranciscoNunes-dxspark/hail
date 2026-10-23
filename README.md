@@ -324,6 +324,7 @@ over and press `↵`.
 | What's taken | |
 | --- | --- |
 | A request (Sonar copies them from its logs and incidents) | Added to the end of the file as `### replay <METHOD> <path>` and picked in Requests, ready to send. When the environment says where the API is (`host`, `baseUrl` or `baseURL`), Hail asks whether to send it there (the URL's scheme and host become `{{host}}`) or to where it came from. Credential headers it may carry are left out |
+| Rows (Trawl copies them from its results) | Made a JSON body, an array of objects (one object for one row), and Hail asks where it goes: a new `POST` request at the end of the file, to `{{host}}/<table>` when the table is known, or in place of the body of the request under the cursor (a `Content-Type: application/json` header added when it has none). Either is an edit of the file, so `ctrl+z` in Edit undoes it |
 | Anything else | Said to be another app's: a commit, a file or an exception is Splice's, a query is Trawl's |
 
 ## Keys
