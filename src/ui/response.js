@@ -80,6 +80,24 @@ export function responseLines(sent, width, { headers = false, contract = null } 
   out.push(...contractLines(contract));
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);
-  for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) out.push([{ text: part }]);
-  return out;
+  return out.concat(bodyLines(r, width));
+}
+
+// A big body takes a while to indent and wrap, and the views draw on every key, so its lines are
+// kept for each response (until it's gone) at the last few widths it was drawn at.
+const BODIES = new WeakMap();
+const WIDTHS = 4;
+
+/** The body of response `r` as lines `width` wide (JSON indented), the same array each time. */
+export function bodyLines(r, width) {
+  let byWidth = BODIES.get(r);
+  if (!byWidth) BODIES.set(r, (byWidth = new Map()));
+  let lines = byWidth.get(width);
+  if (!lines) {
+    lines = [];
+    for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) lines.push([{ text: part }]);
+    if (byWidth.size >= WIDTHS) byWidth.delete(byWidth.keys().next().value);
+    byWidth.set(width, lines);
+  }
+  return lines;
 }

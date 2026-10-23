@@ -425,7 +425,7 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
       </Panel>
       {pane ? (
         <Panel title={sent ? 'Response' : 'Request'} hint={sent ? 'v full view' : ''} width={paneW} height={height}>
-          <Lines lines={pane.map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
+          <Lines lines={pane.slice(0, innerH).map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
         </Panel>
       ) : null}
     </>

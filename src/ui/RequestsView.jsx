@@ -71,7 +71,7 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
         })}
       </Panel>
       <Panel title={sent ? 'Response' : 'Request'} hint={sent ? 'v full view' : '↵ send'} width={paneW} height={height}>
-        <Lines lines={lines.map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
+        <Lines lines={lines.slice(0, innerH).map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
       </Panel>
     </>
   );
