@@ -4,7 +4,7 @@ import { lineText, markRanges, matcher } from '../search.js';
 import { theme } from '../theme.js';
 import { useMouse } from './hooks.js';
 import { Lines, Panel, Row } from './parts.jsx';
-import { responseLines } from './response.js';
+import { bodyLines, responseLines } from './response.js';
 
 /**
  * The response to the request picked in Requests, the whole width: scrolls, h shows the headers, y
@@ -28,13 +28,30 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
     topRef.current = Math.max(0, Math.min(max, n));
     setTopState(topRef.current);
   };
+  // The lines `query` is in. The body's are kept while the query and the body's lines stay the same
+  // (they're bodyLines' own array, at the end of `lines`), so a big body is searched once, not per key.
+  const found = useRef({ body: null, query: '', hits: [] });
+  const hitsFor = (query) => {
+    const f = matcher(query);
+    if (!f) return [];
+    const body = sent ? bodyLines(sent.response, width - 4) : [];
+    const head = lines.length - body.length;
+    if (found.current.body !== body || found.current.query !== query) {
+      const hits = [];
+      for (let i = 0; i < body.length; i++) if (f(lineText(body[i])).length) hits.push(head + i);
+      found.current = { body, query, head, hits };
+    }
+    const { hits, head: was } = found.current;
+    const top = [];
+    for (let i = 0; i < head; i++) if (f(lineText(lines[i])).length) top.push(i);
+    return [...top, ...(was === head ? hits : hits.map((i) => i - was + head))];
+  };
   const find = matcher(search.query);
-  const hits = find ? lines.map((l, i) => (find(lineText(l)).length ? i : -1)).filter((i) => i >= 0) : [];
+  const hits = hitsFor(search.query);
 
   /** Puts match `n` (wrapping round) a third of the way down the pane. */
   const goTo = (n, query = searchRef.current.query) => {
-    const f = matcher(query);
-    const all = f ? lines.map((l, i) => (f(lineText(l)).length ? i : -1)).filter((i) => i >= 0) : [];
+    const all = hitsFor(query);
     if (!all.length) return;
     const at = ((n % all.length) + all.length) % all.length;
     setSearch({ ...searchRef.current, query, at });
@@ -90,16 +107,16 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
 
   const shown = Math.min(top, max);
   const here = hits[Math.min(search.at, hits.length - 1)];
-  const marked = find
-    ? lines.map((l, i) => markRanges(l, find(lineText(l)), { bg: i === here ? theme.matchHere : theme.match, color: theme.ink }))
-    : lines;
+  // Only the lines on screen are drawn, so only they are marked.
+  const visible = lines.slice(shown, shown + innerH);
+  const marked = find ? visible.map((l, k) => markRanges(l, find(lineText(l)), { bg: shown + k === here ? theme.matchHere : theme.match, color: theme.ink })) : visible;
   const title = request ? `${request.method} ${request.name ?? request.url}` : 'Response';
   const where = search.query || search.typing ? `/${search.query}${search.typing ? '▏' : ''} ${hits.length ? `${Math.min(search.at, hits.length - 1) + 1}/${hits.length}` : 'no match'} · ` : '';
   const hint = sent ? `${where}${lines.length > innerH ? `${shown + 1}/${lines.length} · ` : ''}/ search · h headers · ↵ send again` : '';
   return (
     <Panel title={title} hint={hint} width={width} height={height} focused={active}>
       {sent ? (
-        <Lines lines={marked.map((segs) => [{ text: ' ' }, ...segs])} width={width - 2} height={innerH} offset={shown} />
+        <Lines lines={marked.map((segs) => [{ text: ' ' }, ...segs])} width={width - 2} height={innerH} />
       ) : (
         <Row pointer={false} width={width - 2} segments={[{ text: request ? '  Not sent yet: ↵ sends it.' : '  Open a .http file to send its requests.', color: theme.dim }]} />
       )}
