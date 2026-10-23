@@ -203,7 +203,8 @@ X-From: {{login.response.body.token}}
   const errs = [];
   assert.equal(await runTests(['api.http', '--env', 'prod'], { print: () => {}, printError: (l) => errs.push(l), cwd: dir, config: {} }), 2);
   assert.match(errs[0], /no environment called prod. There are: dev, other/);
-  assert.deepEqual(testArgs(['--env=dev', 'a.http']), { file: 'a.http', env: 'dev', help: false });
+  assert.deepEqual(testArgs(['--env=dev', 'a.http']), { file: 'a.http', env: 'dev', help: false, contract: null, strict: false });
+  assert.deepEqual(testArgs(['--contract', 'o.yaml', '--contract-strict']), { file: null, env: null, help: false, contract: 'o.yaml', strict: true });
   assert.match(testArgs(['--bogus']).problem, /--bogus isn't an option/);
 });
 

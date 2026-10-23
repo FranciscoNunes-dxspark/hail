@@ -8,18 +8,22 @@ import { loadConfig } from './config.js';
 import { createJar } from './cookies.js';
 import { defaultEnvironment } from './environments.js';
 import { findHttpFiles, loadHttpFile } from './files.js';
+import { checkContract, loadContract } from './contract.js';
 import { exchange, reportLines, runFailed } from './runner.js';
 import { prepare } from './send.js';
 
-export const TEST_USAGE = `hail test [file.http] [--env <name>]
+export const TEST_USAGE = `hail test [file.http] [--env <name>] [--contract <openapi file or URL>] [--contract-strict]
 
 Sends every request in the file, top to bottom, runs their response handlers
 (> {% client.test(...) %}), prints a report, and exits with 1 if a test failed,
-a handler broke, or a request wasn't sent or got no answer (2 if it couldn't run).`;
+a handler broke, or a request wasn't sent or got no answer (2 if it couldn't run).
+
+Responses are checked against the contract /contract set for the file in Hail
+(or --contract's); drifting from it counts as failing only with --contract-strict.`;
 
 /** `hail test`'s arguments: { file, env, help } or { problem }. */
 export function testArgs(args) {
-  const out = { file: null, env: null, help: false };
+  const out = { file: null, env: null, help: false, contract: null, strict: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-h' || a === '--help') out.help = true;
@@ -27,6 +31,11 @@ export function testArgs(args) {
       out.env = args[++i] ?? null;
       if (!out.env) return { problem: '--env needs the name of an environment' };
     } else if (a.startsWith('--env=')) out.env = a.slice(6);
+    else if (a === '--contract') {
+      out.contract = args[++i] ?? null;
+      if (!out.contract) return { problem: '--contract needs an OpenAPI file or URL' };
+    } else if (a.startsWith('--contract=')) out.contract = a.slice(11);
+    else if (a === '--contract-strict') out.strict = true;
     else if (a.startsWith('-')) return { problem: `${a} isn't an option of hail test` };
     else if (out.file) return { problem: `One file at a time: ${out.file} or ${a}?` };
     else out.file = a;
@@ -80,7 +89,18 @@ export async function runTests(args, { print = console.log, printError = console
     return 2;
   }
   const env = a.env ?? defaultEnvironment(data, config.environments?.[data.path]);
-  print(`${data.name}${env ? ` · ${env}` : ''} · ${data.requests.length} request${data.requests.length === 1 ? '' : 's'}\n`);
+  // The contract: --contract's, else the one /contract set for this file.
+  const source = a.contract ?? config.contracts?.[data.path] ?? null;
+  let contract = null;
+  if (source) {
+    try {
+      contract = await loadContract(source, { dir: a.contract ? cwd : data.dir });
+    } catch (e) {
+      printError(`The contract: ${e.message}`);
+      if (a.contract || a.strict) return 2;
+    }
+  }
+  print(`${data.name}${env ? ` · ${env}` : ''} · ${data.requests.length} request${data.requests.length === 1 ? '' : 's'}${contract ? ` · contract ${source}` : ''}\n`);
   const secret = async (name) => {
     try {
       return (await credentials?.get(name)) ?? null;
@@ -110,13 +130,14 @@ export async function runTests(args, { print = console.log, printError = console
       const out = await exchange(req, { globals, jar, insecure: data.environments.options(env).insecure });
       globals = out.globals;
       if (request.name) responses[request.name] = out.response;
-      results.push({ request, response: out.response, checks: out.checks, saved: out.saved });
+      const drift = contract ? checkContract(contract.spec, req, out.response) : undefined;
+      results.push({ request, response: out.response, checks: out.checks, saved: out.saved, contract: drift });
     } catch (e) {
       results.push({ request, error: e.message });
       stopped = true;
       break;
     }
   }
-  print(plainReport(reportLines(results, { left: data.requests.slice(results.length), stopped }), { color }));
-  return runFailed(results) ? 1 : 0;
+  print(plainReport(reportLines(results, { left: data.requests.slice(results.length), stopped, strict: a.strict }), { color }));
+  return runFailed(results, { strict: a.strict }) ? 1 : 0;
 }

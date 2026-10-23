@@ -15,6 +15,7 @@ import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
+import { checkContract, loadContract } from '../contract.js';
 import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
@@ -143,6 +144,9 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const jarsRef = useRef(new Map());
   // client.global.set's variables: kept for the open file until another is opened or Hail closes.
   const globalsRef = useRef({});
+  // The open file's contract (/contract): where it's from, the document, and each response's check of it.
+  const contractRef = useRef({ path: null, source: null, spec: null, error: null, checked: new WeakMap() });
+  const [, setContractTick] = useState(0);
   const selectedRef = useRef(0);
   // Counts goToRequest's jumps, so the Requests view moves its cursor even while it's on screen.
   const [jump, setJump] = useState(0);
@@ -353,12 +357,31 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         setHistory(entries);
         responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at, checks: e.checks, saved: e.saved }]));
         setResponses(responsesRef.current);
+        readContract(d);
       }
     } catch (e) {
       note(`Couldn't read ${basename(file)}: ${firstLine(e.message)}`, 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  // The contract /contract set for file `d`, read when the file opens (and on r); a URL is fetched.
+  const readContract = async (d) => {
+    const source = configRef.current.contracts?.[d.path] ?? null;
+    contractRef.current = { path: d.path, source, spec: null, error: null, checked: new WeakMap() };
+    setContractTick((n) => n + 1);
+    if (!source) return;
+    try {
+      const c = await loadContract(source, { dir: d.dir });
+      if (contractRef.current.path !== d.path || contractRef.current.source !== source) return;
+      contractRef.current = { ...contractRef.current, spec: c.spec, operations: c.operations };
+    } catch (e) {
+      if (contractRef.current.path !== d.path) return;
+      contractRef.current = { ...contractRef.current, error: e.message };
+      note(`The contract for ${d.name}: ${firstLine(e.message)}`, 'error');
+    }
+    setContractTick((n) => n + 1);
   };
 
   const openFile = async (file) => {
@@ -464,6 +487,28 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         responses: named,
         env: { azToken, secret: (name) => credentials.get(name) },
       };
+    },
+    // The open file's contract: { source, spec, operations, error } (spec null without one).
+    contract: () => contractRef.current,
+    // /contract: `source` (null forgets it) and what loadContract read from it, kept for this file.
+    setContract: (source, loaded = null) => {
+      const path = dataRef.current?.path;
+      if (!path) return;
+      setConfig((c) => {
+        const contracts = { ...c.contracts };
+        if (source) contracts[path] = source;
+        else delete contracts[path];
+        return { ...c, contracts };
+      });
+      contractRef.current = { path, source, spec: loaded?.spec ?? null, operations: loaded?.operations, error: null, checked: new WeakMap() };
+      setContractTick((n) => n + 1);
+    },
+    // How a response (`sent`: { request, response }) compares with the contract, worked out once; null without one.
+    contractFor: (sent) => {
+      const c = contractRef.current;
+      if (!c.spec || !sent?.response || !sent.request) return null;
+      if (!c.checked.has(sent.response)) c.checked.set(sent.response, checkContract(c.spec, sent.request, sent.response));
+      return c.checked.get(sent.response);
     },
     // The environment's settings (environments.js's options): { insecure }.
     environmentOptions: () => dataRef.current?.environments.options?.(environment()) ?? {},
@@ -599,7 +644,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     viewHasKeys: () => focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && answerKey.current !== keySeq.current,
     overlayHasKeys: () => focusRef.current === 'view' && !confirmRef.current && answerKey.current !== keySeq.current,
     quit: () => exit(),
-    refresh: () => reload(),
+    refresh: async () => {
+      await reload();
+      if (dataRef.current) readContract(dataRef.current);
+    },
     showText: (title, text, opts = {}) => setOverlay({ title, text, ...opts }),
     // A list to pick from: { title, hint, items | load, onPick, keys, empty } (see Picker.jsx).
     // `replace`: swaps the picker on screen for this one (the same list, redrawn after a change), keeping

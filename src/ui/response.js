@@ -1,6 +1,7 @@
 // What a response looks like on screen, as lines of segments: the status, how long it took and how
 // big it was, the headers when they're asked for, then the body (JSON indented). Shared by the pane
 // beside the request list and the Response view.
+import { driftSummary, issueText } from '../contract.js';
 import { formatSize, prettyBody } from '../send.js';
 import { theme } from '../theme.js';
 import { relTime, wrap } from '../text.js';
@@ -40,11 +41,23 @@ export function checkLines(checks) {
   return out;
 }
 
+/** How a response compares with the contract (contract.js's checkContract): a line, then each difference. */
+export function contractLines(result) {
+  if (!result) return [];
+  if (!result.issues.length) return [[{ text: '✓ ', color: theme.add, bold: true }, { text: `Contract: ${driftSummary(result)}`, color: theme.dim }]];
+  const colour = { added: theme.info, missing: theme.del };
+  return [
+    [{ text: '⚠ ', color: theme.warn, bold: true }, { text: `Contract: ${driftSummary(result)}`, color: theme.warn, bold: true }, { text: result.operation ? `  ${result.operation}${result.status ? ` ${result.status}` : ''}` : '', color: theme.dim }],
+    ...result.issues.map((i) => [{ text: `  ${issueText(i)}`, color: colour[i.kind] ?? theme.warn }]),
+  ];
+}
+
 /**
  * `sent` ({ response, request, at, checks }) as lines `width` wide: the status, how its tests went,
- * then the body. `headers` shows the response's headers too.
+ * how it compares with the contract (`contract`, when there is one), then the body. `headers` shows
+ * the response's headers too.
  */
-export function responseLines(sent, width, { headers = false } = {}) {
+export function responseLines(sent, width, { headers = false, contract = null } = {}) {
   const r = sent.response;
   const out = [
     [
@@ -60,6 +73,7 @@ export function responseLines(sent, width, { headers = false } = {}) {
   if (sent.saved?.error) out.push([{ text: sent.saved.error, color: theme.del }]);
   else if (sent.saved) out.push([{ text: `Saved to ${sent.saved.shown}`, color: theme.dim }]);
   out.push(...checkLines(sent.checks));
+  out.push(...contractLines(contract));
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);
   for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) out.push([{ text: part }]);

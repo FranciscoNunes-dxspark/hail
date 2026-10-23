@@ -22,7 +22,7 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
     searchRef.current = s;
     setSearchState(s);
   };
-  const lines = sent ? responseLines(sent, width - 4, { headers }) : [];
+  const lines = sent ? responseLines(sent, width - 4, { headers, contract: ctx.contractFor(sent) }) : [];
   const max = Math.max(0, lines.length - innerH);
   const setTop = (n) => {
     topRef.current = Math.max(0, Math.min(max, n));

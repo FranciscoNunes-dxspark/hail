@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { clip, draftPrompt, parseDraft } from './claude.js';
 import { configFile } from './config.js';
+import { driftSummary, loadContract } from './contract.js';
 import { curlToHttp, parseCurl } from './curl.js';
 import { changedOnly, lineDiff } from './diff.js';
 import { writeExample } from './files.js';
@@ -15,7 +16,7 @@ import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
 import { formatSize, prepare, prettyBody, toCurl } from './send.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
-import { checkLines, statusColour } from './ui/response.js';
+import { checkLines, contractLines, statusColour } from './ui/response.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -72,15 +73,16 @@ async function exchangeFor(ctx, request, req, signal) {
   const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure });
   ctx.setGlobals(out.globals);
   ctx.setResponse(request, req, out.response, { checks: out.checks, saved: out.saved });
-  return out;
+  return { ...out, contract: ctx.contractFor({ request: req, response: out.response }) ?? undefined };
 }
 
 /** What a response says in the activity lines: its status, time and size, and how its tests went. */
-function responseSummary({ response: res, checks, saved }) {
+function responseSummary({ response: res, checks, saved, contract }) {
   const summary = checkSummary(checks);
+  const drift = contract?.issues.length ? [`⚠ ${driftSummary(contract)}`] : [];
   const failed = (checks?.tests ?? []).filter((t) => !t.passed).map((t) => `✗ ${t.name}`);
   const save = saved?.error ?? (saved ? `Saved to ${saved.shown}` : null);
-  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : [])].join('\n');
+  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : []), ...drift].join('\n');
 }
 
 /** ↵ in Requests, and /send: sends it, and shows what came back. `/send all` sends every one. */
@@ -209,8 +211,8 @@ export async function secret(ctx, name) {
   });
 }
 
-/** A kept response, as the viewer's coloured lines: the request as sent, then what came back. */
-export function entryLines(entry) {
+/** A kept response, as the viewer's coloured lines: the request as sent, then what came back (and how it compares with `contract`). */
+export function entryLines(entry, contract = null) {
   const { request: q, response: r } = entry;
   const out = [
     [{ text: `${q.method} ${q.url}`, bold: true }],
@@ -220,6 +222,7 @@ export function entryLines(entry) {
     [{ text: `${r.status} ${r.statusText}`, bold: true, color: r.status < 400 ? theme.add : theme.del }, { text: `  ${r.ms} ms · ${formatSize(r.size)} · ${new Date(entry.at).toLocaleString()}`, color: theme.dim }],
     ...(entry.saved ? [[{ text: entry.saved.error ?? `Saved to ${entry.saved.shown}`, color: entry.saved.error ? theme.del : theme.dim }]] : []),
     ...checkLines(entry.checks),
+    ...contractLines(contract),
     ...r.headers.map(([k, v]) => [{ text: `${k}: `, color: theme.dim }, { text: v }]),
     [],
     ...prettyBody(r).split('\n').map((l) => [{ text: l }]),
@@ -230,7 +233,7 @@ export function entryLines(entry) {
 
 /** ↵ in History: a kept response in the viewer. */
 export function showEntry(ctx, entry) {
-  ctx.showText(`${entry.label} · ${new Date(entry.at).toLocaleString()}`, prettyBody(entry.response), { lines: entryLines(entry) });
+  ctx.showText(`${entry.label} · ${new Date(entry.at).toLocaleString()}`, prettyBody(entry.response), { lines: entryLines(entry, ctx.contractFor?.(entry)) });
 }
 
 /** d in History: how a response differs from the one before it to the same request. */
@@ -340,6 +343,37 @@ export function cookies(ctx, rest) {
     lines.push([{ text: `  ${c.name}`, bold: true }, { text: `=${c.value}` }, { text: `  ${flags}`, color: theme.dim }]);
   }
   ctx.showText(`Cookies: ${where} · ${list.length}`, list.map((c) => `${c.domain}\t${c.path}\t${c.name}=${c.value}`).join('\n'), { lines });
+}
+
+/**
+ * /contract <openapi file or URL>: every response to the open file's requests is checked against it
+ * from now on (remembered for the file); `off` forgets it; nothing says which it is.
+ */
+export async function contract(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const arg = rest.trim();
+  const cur = ctx.contract();
+  const name = ctx.data.name;
+  if (!arg) {
+    if (!cur.source) return ctx.note(`${name} has no contract. /contract <openapi.json, openapi.yaml or a URL> checks every response against it.`);
+    if (cur.error) return ctx.note(`${name}'s contract, ${cur.source}, couldn't be read: ${cur.error}`, 'error');
+    return ctx.note(`${name} is checked against ${cur.source}${cur.spec ? ` (${cur.operations} operations)` : ''}. /contract off forgets it.`);
+  }
+  if (arg === 'off') {
+    if (!cur.source) return ctx.note(`${name} has no contract to forget.`);
+    ctx.setContract(null);
+    return ctx.note(`${name}'s responses aren't checked against ${cur.source} any more`);
+  }
+  const source = /^https?:\/\//i.test(arg) ? arg : resolve(ctx.data.dir, arg);
+  return ctx.task(
+    `Contract ${arg}`,
+    async (signal) => {
+      const c = await loadContract(source, { dir: ctx.data.dir, signal });
+      ctx.setContract(source, c);
+      return { stdout: `${c.operations} operation${c.operations === 1 ? '' : 's'}: every response to ${name}'s requests is checked against it` };
+    },
+    { label: 'Reading the contract' },
+  );
 }
 
 /** e and /env: the environment the variables come from, named or picked from a list. */

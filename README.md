@@ -28,7 +28,7 @@ npm start -- api.http
 ```bash
 hail api.http     # that file
 hail              # the first .http (or .rest) file in this folder or the two below it
-hail test api.http [--env dev]   # send them all without the screen and report (for CI)
+hail test api.http [--env dev] [--contract-strict]   # send them all without the screen and report (for CI)
 ```
 
 With none, `/new` writes an example to start from.
@@ -218,7 +218,27 @@ does the same without the screen: it prints the report and exits with 1 when a t
 broke, or a request wasn't sent or got no answer (2 when it couldn't run at all, as with a file that
 isn't there). Without `--env` it uses the environment Hail would pick (the one chosen last for the
 file, else dev or local). Nothing is kept in the history. `{{$secret}}` reads the system's store as Hail
-does; on a build server, `{{$processEnv NAME}}` is usually the way to hand it a secret.
+does; on a build server, `{{$processEnv NAME}}` is usually the way to hand it a secret. Responses are
+checked against the file's contract (see [Contract drift](#contract-drift)); `--contract-strict` makes
+drift fail the run too.
+
+### Contract drift
+
+`/contract openapi.yaml` (or a `.json` file, or a URL) checks every response to the open file's
+requests against an OpenAPI 3 or Swagger 2 document, from then on: Hail remembers it for the file, and
+`/contract off` forgets it (`/contract` alone says which it is). Each response is matched to its
+operation by method and path (the servers' or `basePath`'s prefix taken off, `{id}` templates matched),
+and its status to the operation's responses (the status itself, then `2XX`, then `default`). Its JSON
+body is checked against the schema: types (and `nullable`), required fields, the properties there are
+(`additionalProperties` included), array items, `enum`, `oneOf`, `anyOf` and `allOf`, and `$ref`s inside
+the document; formats aren't checked.
+
+A Contract section shows with the response: `+` a field the contract doesn't have, `−` a required one
+that's missing, `≠` a wrong type or a value outside its `enum`, and a status, method or path the
+contract doesn't document; the same difference in many items of an array is said once. A response that
+drifted has a `⚠` beside its status in Requests, and `/send all` lists the differences under each
+request. Drift isn't a failure: `hail test` reports it and still exits with 0, unless
+`--contract-strict` is given. It uses the contract set for the file, or `--contract <file or URL>`'s.
 
 ### Cookies
 
@@ -343,6 +363,7 @@ and Trawl.
 | `/curl [request]` | Copy a request, filled in, as a curl command |
 | `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |
 | `/open <file.http>` | Open another file |
+| `/contract [file\|url\|off]` | Check every response against an OpenAPI or Swagger document, remembered for the file (`off` forgets it) |
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
 | `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |
 | `/history [clear]` | The responses kept for this file (`clear` forgets them) |

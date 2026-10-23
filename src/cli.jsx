@@ -33,13 +33,14 @@ if (args.includes('-v') || args.includes('--version')) {
 
 if (args.includes('-h') || args.includes('--help')) {
   console.log(`hail [file.http]
-hail test [file.http] [--env <name>]
+hail test [file.http] [--env <name>] [--contract <openapi>] [--contract-strict]
 
 An HTTP client for the terminal, over .http files. Opens [file.http], or the
 first .http file in the current folder (or the folders under it).
 
 hail test sends every request in the file without the UI, prints a report of
-their response handlers' tests, and exits with 1 if anything failed.
+their response handlers' tests and how they compare with the contract, and
+exits with 1 if anything failed (drift only with --contract-strict).
 
 Inside: ↵ sends the request under the cursor, e picks the environment,
 ? shows every key, / the commands.`);

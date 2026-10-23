@@ -131,6 +131,16 @@ export const HELP = [
     ],
   },
   {
+    title: 'Contract',
+    about: 'responses checked against an OpenAPI 3 or Swagger 2 document (JSON or YAML)',
+    rows: [
+      ['/contract openapi.yaml', 'Check every response to this file\'s requests against it (a file or a URL; remembered for the file) · /contract off forgets it'],
+      ['Contract section', 'With each response: + a field the contract doesn\'t have · − a required one missing · ≠ a wrong type or value · a status or path it doesn\'t document'],
+      ['⚠', 'In Requests, beside a response that drifted; /send all lists the differences under each request'],
+      ['--contract-strict', 'hail test counts drift as a failure only with it (--contract <file> uses another contract)'],
+    ],
+  },
+  {
     title: 'Log',
     about: 'what has run, newest at the bottom',
     views: ['log'],

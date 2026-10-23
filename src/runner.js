@@ -6,6 +6,7 @@ import { dirname, extname } from 'node:path';
 import { runChecks } from './checks.js';
 import { send } from './send.js';
 import { parseTimeout } from './transport.js';
+import { issueText } from './contract.js';
 
 /**
  * Sends `req` (send.js's prepare), saves its body where `>> path` says, and runs its handlers. Resolves
@@ -67,9 +68,10 @@ export function saveBody(bytes, output) {
 
 /** How a run's results went: the requests sent, and the tests passed and failed. */
 export function tally(results) {
-  const t = { requests: results.length, sent: 0, tests: 0, passed: 0, failed: 0, errors: 0, skipped: 0 };
+  const t = { requests: results.length, sent: 0, tests: 0, passed: 0, failed: 0, errors: 0, skipped: 0, drift: 0 };
   for (const r of results) {
     if (r.response) t.sent++;
+    if (r.contract?.issues.length) t.drift++;
     if (r.error) t.errors++;
     if (r.skipped) t.skipped++;
     for (const test of r.checks?.tests ?? []) {
@@ -83,10 +85,13 @@ export function tally(results) {
   return t;
 }
 
-/** Whether a run failed: a test failed, a handler broke, a request wasn't sent or got no answer. */
-export const runFailed = (results) => {
+/**
+ * Whether a run failed: a test failed, a handler broke, a request wasn't sent or got no answer; with
+ * `strict`, also a response that drifted from the contract.
+ */
+export const runFailed = (results, { strict = false } = {}) => {
   const t = tally(results);
-  return t.failed > 0 || t.errors > 0 || t.skipped > 0;
+  return t.failed > 0 || t.errors > 0 || t.skipped > 0 || (strict && t.drift > 0);
 };
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -99,6 +104,7 @@ export function summaryLine(results, { stopped = false } = {}) {
   if (t.tests) parts.push(`${plural(t.tests, 'test')}: ${t.passed} passed${t.failed ? `, ${t.failed} failed` : ''}`);
   else parts.push('no tests');
   if (t.errors) parts.push(plural(t.errors, 'error'));
+  if (t.drift) parts.push(`${t.drift} drifted from the contract`);
   if (stopped) parts.push('stopped');
   return parts.join(' · ');
 }
@@ -108,21 +114,25 @@ export function summaryLine(results, { stopped = false } = {}) {
  * 'dim', 'warn' or a status ({ status }). Each request: a mark, its status, its name, how long, its
  * tests; under it the tests that failed, the handler's error, what it logged, and why it wasn't sent.
  * `results`: [{ request, response?, checks?, error?, skipped?, saved? }]; `stopped`: the run stopped
- * early (a request got no answer, or it was cancelled), naming the requests that didn't run.
+ * early (a request got no answer, or it was cancelled), naming the requests that didn't run. A result's
+ * `contract` (contract.js's checkContract) lists how it drifted, a failure only when `strict`.
  */
-export function reportLines(results, { left = [], stopped = false } = {}) {
+export function reportLines(results, { left = [], stopped = false, strict = false } = {}) {
   const out = [];
   for (const r of results) {
     const tests = r.checks?.tests ?? [];
     const failed = tests.filter((x) => !x.passed);
-    const bad = r.error || r.skipped || failed.length || r.checks?.error;
+    const drift = r.contract?.issues ?? [];
+    const bad = r.error || r.skipped || failed.length || r.checks?.error || (strict && drift.length);
     const head = [{ text: bad ? '✗ ' : '✓ ', tone: bad ? 'del' : 'add' }];
     if (r.response) head.push({ text: `${r.response.status} `, status: r.response.status });
     head.push({ text: r.request.label, bold: true });
     if (r.response) head.push({ text: `  ${r.response.ms} ms`, tone: 'dim' });
     if (tests.length) head.push({ text: `  ${failed.length ? `${failed.length} of ${plural(tests.length, 'test')} failed` : `${plural(tests.length, 'test')} passed`}`, tone: failed.length ? 'del' : 'add' });
     if (r.saved?.shown) head.push({ text: `  → ${r.saved.shown}`, tone: 'dim' });
+    if (drift.length) head.push({ text: `  ⚠ ${plural(drift.length, 'difference')} from the contract`, tone: 'warn' });
     out.push(head);
+    for (const i of drift) out.push([{ text: `    ${issueText(i)}`, tone: 'warn' }]);
     for (const x of failed) out.push([{ text: '    ✗ ', tone: 'del' }, { text: x.name }, ...(x.message && x.message !== x.name ? [{ text: `: ${x.message}`, tone: 'dim' }] : [])]);
     if (r.checks?.error) out.push([{ text: '    ✗ ', tone: 'del' }, { text: r.checks.error, tone: 'del' }]);
     if (r.error) out.push([{ text: `    ${r.error}`, tone: 'del' }]);
@@ -131,7 +141,7 @@ export function reportLines(results, { left = [], stopped = false } = {}) {
     for (const l of r.checks?.log ?? []) out.push([{ text: `    › ${l}`, tone: 'dim' }]);
   }
   for (const request of left) out.push([{ text: '  ', tone: 'dim' }, { text: request.label, tone: 'dim' }, { text: '  not run', tone: 'dim' }]);
-  out.push([], [{ text: summaryLine(results, { stopped }), bold: true, tone: runFailed(results) ? 'del' : 'add' }]);
+  out.push([], [{ text: summaryLine(results, { stopped }), bold: true, tone: runFailed(results, { strict }) ? 'del' : 'add' }]);
   return out;
 }
 

@@ -42,7 +42,7 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
   });
 
   const paneW = width - listW;
-  const lines = !sel ? [] : sent ? responseLines(sent, paneW - 4) : requestLines(sel, paneW - 4);
+  const lines = !sel ? [] : sent ? responseLines(sent, paneW - 4, { contract: ctx.contractFor(sent) }) : requestLines(sel, paneW - 4);
   return (
     <>
       <Panel title={data.name} hint={`${requests.length}`} width={listW} height={height} focused={active}>
@@ -50,6 +50,7 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
         {requests.slice(nav.offset, nav.offset + innerH).map((r, i) => {
           const done = responses[r.label]?.response;
           const failed = (responses[r.label]?.checks?.tests ?? []).some((t) => !t.passed) || Boolean(responses[r.label]?.checks?.error);
+          const drifted = Boolean(ctx.contractFor(responses[r.label])?.issues.length);
           return (
             <Row
               key={r.index}
@@ -60,6 +61,7 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
                 { text: fit(r.method, 7), color: methodColour(r.method), bold: true },
                 { text: done ? `${done.status} ` : '', color: done ? statusColour(done.status) : undefined },
                 { text: failed ? '✗ ' : '', color: theme.del, bold: true },
+                { text: drifted ? '⚠ ' : '', color: theme.warn, bold: true },
                 { text: r.name ?? r.url, strong: true },
               ]}
             />
