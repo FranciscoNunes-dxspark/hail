@@ -127,6 +127,18 @@ export function findOperation(spec, method, url) {
 
 /** `node` with its local $ref followed (through as many as there are), or null for one that can't be. */
 export function deref(spec, node) {
+  if (!node || typeof node !== 'object' || typeof node.$ref !== 'string') return node ?? null;
+  if (!spec || typeof spec !== 'object') return follow(spec, node);
+  // Where a $ref leads is the same each time, and a body of many items asks for it once an item.
+  let refs = REFS.get(spec);
+  if (!refs) REFS.set(spec, (refs = new Map()));
+  if (!refs.has(node.$ref)) refs.set(node.$ref, follow(spec, node));
+  return refs.get(node.$ref);
+}
+
+const REFS = new WeakMap();
+
+function follow(spec, node) {
   let n = node;
   for (let hops = 0; n && typeof n === 'object' && typeof n.$ref === 'string'; hops++) {
     if (hops > 50 || !n.$ref.startsWith('#')) return null;

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { basePaths, findOperation } from '../src/contract.js';
+import { basePaths, deref, findOperation } from '../src/contract.js';
 import { readHistory } from '../src/history.js';
 import { send } from '../src/send.js';
 import { highlight, highlightLines, parseHttpFile } from '../src/http-file.js';
@@ -199,4 +199,21 @@ test("an operation is found as matching every path's expression in turn finds it
   };
   const urls = ['/', '/v1', '/v1/', '/users', '/users/', '/users/7', '/users/me', '/users/7/posts/3', '/v1/users/7', '/files/a.txt', '/files/a', '/a+b/(c)', '/ab/c', '/nothing/here', '/users/7/', '/x%20y'];
   for (const url of urls) for (const method of ['GET', 'POST', 'DELETE']) assert.deepEqual(findOperation(spec, method, `http://h${url}`), slow(spec, method, `http://h${url}`), `${method} ${url}`);
+});
+
+test('a $ref leads where it led the first time, through chains, escapes and dead ends', () => {
+  const spec = { components: { schemas: { A: { $ref: '#/components/schemas/B' }, B: { type: 'string' }, 'a/b~c': { type: 'integer' }, Loop: { $ref: '#/components/schemas/Loop' } } } };
+  for (let round = 0; round < 2; round++) {
+    assert.deepEqual(deref(spec, { $ref: '#/components/schemas/A' }), { type: 'string' });
+    assert.deepEqual(deref(spec, { $ref: '#/components/schemas/a~1b~0c' }), { type: 'integer' });
+    assert.equal(deref(spec, { $ref: '#/components/schemas/Nope' }), null);
+    assert.equal(deref(spec, { $ref: '#/components/schemas/Loop' }), null);
+    assert.equal(deref(spec, { $ref: 'other.json#/x' }), null);
+    assert.deepEqual(deref(spec, { type: 'object' }), { type: 'object' });
+    assert.equal(deref(spec, null), null);
+    assert.equal(deref(spec, false), false);
+  }
+  assert.equal(deref(null, { $ref: '#/x' }), null);
+  // Another spec has its own answers.
+  assert.deepEqual(deref({ components: { schemas: { A: { type: 'number' } } } }, { $ref: '#/components/schemas/A' }), { type: 'number' });
 });
