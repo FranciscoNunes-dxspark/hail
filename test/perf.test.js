@@ -1,10 +1,13 @@
 // The shortcuts taken for speed give what the long way gives.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { getEventListeners } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.js';
+import { send } from '../src/send.js';
 import { highlight, highlightLines } from '../src/http-file.js';
 import { wrap } from '../src/text.js';
 import { bodyLines, responseLines, wrapIndented } from '../src/ui/response.js';
@@ -97,5 +100,24 @@ test('history read from its bytes: characters of every width, CRLF, blank lines 
     assert.deepEqual(readHistory(join(dir, 'none.jsonl')), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('requests sharing one signal leave no listeners on it, and it still cancels them', async () => {
+  const server = createServer((req, res) => (req.url === '/slow' ? setTimeout(() => res.end('late'), 5000) : res.end('{"ok":true}')));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const controller = new AbortController();
+    await Promise.all(Array.from({ length: 50 }, () => send({ method: 'GET', url: `${url}/`, headers: [] }, { signal: controller.signal })));
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+    const slow = send({ method: 'GET', url: `${url}/slow`, headers: [] }, { signal: controller.signal, timeout: 10_000 });
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(slow, (e) => e.cancelled === true);
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+    await assert.rejects(send({ method: 'GET', url: `${url}/`, headers: [] }, { signal: controller.signal }), (e) => e.cancelled === true, 'already cancelled');
+  } finally {
+    server.closeAllConnections();
+    server.close();
   }
 });

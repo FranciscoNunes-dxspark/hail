@@ -96,8 +96,15 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
   let bytes;
   let redirects = 0;
   let way = { proxy: null, insecure: false };
+  // fetch keeps a listener on the signal it's given until the request is garbage collected, so a run
+  // of many sharing one (/load's) piles thousands up, and Node warns on the terminal. Each request has
+  // a signal of its own instead, tied to `signal` only while it's on its way.
+  const own = signal ? new AbortController() : null;
+  const stop = () => own.abort(signal.reason);
+  if (signal?.aborted) stop();
+  else signal?.addEventListener('abort', stop, { once: true });
   const timer = timeout ? AbortSignal.timeout(timeout) : null;
-  const both = timer && signal ? AbortSignal.any([signal, timer]) : (timer ?? signal);
+  const both = timer && own ? AbortSignal.any([own.signal, timer]) : (timer ?? own?.signal);
   try {
     for (;;) {
       const cookie = jar && !has(headers, 'cookie') ? jar.header(url) : '';
@@ -131,6 +138,8 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     if (timer?.aborted) throw new Error(`${new URL(url).host} didn't answer within ${timeout >= 1000 ? `${timeout / 1000} s` : `${timeout} ms`} (# @timeout)`);
     throw new Error(networkError(e, url, way));
+  } finally {
+    signal?.removeEventListener('abort', stop);
   }
   return {
     status: res.status,
