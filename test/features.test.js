@@ -129,6 +129,15 @@ test('searching a response: matches as you type, n to the next, esc clears it, a
     await until(() => frame().includes('/bow 1/2'), 'the body still searched under the headers');
     app.stdin.write('n');
     await until(() => frame().includes('/bow 2/2') && /❯?.*"bowsprit"/.test(frame()), 'the second match');
+    // Typing on narrows the matches; a capital makes the search match case.
+    app.stdin.write(KEYS.esc);
+    app.stdin.write('/');
+    await type(app.stdin, 'bowl');
+    await until(() => frame().includes('/bowl▏ 1/1'), 'bowline alone');
+    app.stdin.write(KEYS.backspace);
+    await until(() => frame().includes('/bow▏ 1/2'), 'both again');
+    await type(app.stdin, 'S');
+    await until(() => frame().includes('/bowS▏ no match'), 'no capital S in the body');
   } finally {
     app.unmount();
   }

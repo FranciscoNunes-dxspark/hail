@@ -36,15 +36,19 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
     if (!f) return [];
     const body = sent ? bodyLines(sent.response, width - 4) : [];
     const head = lines.length - body.length;
-    if (found.current.body !== body || found.current.query !== query) {
+    const was = found.current;
+    if (was.body !== body || was.query !== query) {
       const hits = [];
-      for (let i = 0; i < body.length; i++) if (f(lineText(body[i])).length) hits.push(head + i);
+      // Typing on to a query only narrows it (the same case rule): look in the lines it was in.
+      if (was.body === body && was.query && query.startsWith(was.query) && /[A-Z]/.test(query) === /[A-Z]/.test(was.query)) {
+        for (const h of was.hits) if (f(lineText(body[h - was.head])).length) hits.push(head + h - was.head);
+      } else for (let i = 0; i < body.length; i++) if (f(lineText(body[i])).length) hits.push(head + i);
       found.current = { body, query, head, hits };
     }
-    const { hits, head: was } = found.current;
+    const { hits, head: then } = found.current;
     const top = [];
     for (let i = 0; i < head; i++) if (f(lineText(lines[i])).length) top.push(i);
-    return [...top, ...(was === head ? hits : hits.map((i) => i - was + head))];
+    return [...top, ...(then === head ? hits : hits.map((i) => i - then + head))];
   };
   const find = matcher(search.query);
   const hits = hitsFor(search.query);
