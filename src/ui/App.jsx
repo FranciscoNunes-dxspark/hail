@@ -16,6 +16,7 @@ import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
 import { checkContract, loadContract } from '../contract.js';
+import { contextIn } from '../family.js';
 import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
@@ -692,6 +693,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     try {
       let r;
       if (text.startsWith('!')) r = await a.raw(ctx, text.slice(1));
+      // A sibling's context pasted at the prompt without /take (after a / or not).
+      else if (contextIn(text.replace(/^\//, ''))) r = await a.take(ctx, text.replace(/^\//, ''));
       else {
         const [, name, rest] = text.replace(/^\//, '').match(/^(\S+)\s*([\s\S]*)$/);
         const cmd = findCommand(name, customRef.current.commands);

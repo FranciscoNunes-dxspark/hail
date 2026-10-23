@@ -142,6 +142,14 @@ export const HELP = [
     ],
   },
   {
+    title: 'Sibling apps',
+    about: 'Splice, Trawl, Sonar and Bosun hand Hail command lines to paste into the prompt, and Hail hands them some',
+    rows: [
+      ['/take family:v1:…', 'What a sibling copied (/take is optional): a request from Sonar is added as ### replay <METHOD> <path>,\nto the environment\'s {{host}} or to where it came from, and picked to send'],
+      ['paste', 'A line starting with / (or a family:v1: context) pasted while a view has the keys opens the prompt with it, for ↵'],
+    ],
+  },
+  {
     title: 'Log',
     about: 'what has run, newest at the bottom',
     views: ['log'],

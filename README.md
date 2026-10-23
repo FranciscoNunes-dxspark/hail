@@ -309,6 +309,23 @@ that defines the routes.
 /draft ../server/routes.js
 ```
 
+## With the sibling apps
+
+Hail, [Splice](https://github.com/FranciscoNunes-dxspark/splice) (git), [Trawl](https://github.com/FranciscoNunes-dxspark/trawl)
+(SQL), Sonar (Azure) and Bosun (processes) hand each other things as command lines: one app copies a
+line, and you paste it into the other's prompt. None of them starts another, and a line never carries a
+secret. What one app hands another without a command of its own is `/take family:v1:…`, which every
+app's prompt reads (with or without `/take`).
+
+Pasting a line that starts with `/`, or one of those `family:v1:` contexts, while a view has the keys
+(not while typing in Edit) opens the prompt with it rather than taking it as keys, so you can look it
+over and press `↵`.
+
+| What's taken | |
+| --- | --- |
+| A request (Sonar copies them from its logs and incidents) | Added to the end of the file as `### replay <METHOD> <path>` and picked in Requests, ready to send. When the environment says where the API is (`host`, `baseUrl` or `baseURL`), Hail asks whether to send it there (the URL's scheme and host become `{{host}}`) or to where it came from. Credential headers it may carry are left out |
+| Anything else | Said to be another app's: a commit, a file or an exception is Splice's, a query is Trawl's |
+
 ## Keys
 
 | Key | What it does |
@@ -386,6 +403,7 @@ and Trawl.
 | `/cookies [clear]` | The cookies kept for this file and environment (`clear` forgets them) |
 | `/draft <spec> [what]` | Claude writes requests from an API description, for you to look over and add |
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
+| `/take <family:v1:…>` | Take what a sibling app copied (see [With the sibling apps](#with-the-sibling-apps)) |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
 | `/settings` | Accent colour, theme, mouse, updates, notifications, history |

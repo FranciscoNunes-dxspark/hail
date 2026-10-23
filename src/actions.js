@@ -19,6 +19,8 @@ import { parseTimeout } from './transport.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
+import { contextIn, describeContext } from './family.js';
+import { OWNERS, hostVariable, replayBlock } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -511,4 +513,63 @@ async function changeSetting(ctx, row) {
     ctx.setConfig((c) => ({ ...c, [row.id]: [] }));
     redrawSettings(ctx);
   }
+}
+
+/**
+ * /take <context> (or a context pasted bare): what a sibling app copied for Hail. A request (Sonar's
+ * logs) is replayed, rows (Trawl) become a body, a log line (Bosun) is found in the history by its
+ * request id; the other kinds are another app's.
+ */
+export async function take(ctx, rest) {
+  const text = String(rest ?? '').trim();
+  if (!text) return ctx.note('Paste what a sibling app copied for Hail: /take family:v1:…', 'error');
+  const c = contextIn(text);
+  if (!c) return ctx.note("That isn't something a sibling app copied (they start family:v1:).", 'error');
+  if (c.kind === 'request') return takeRequest(ctx, c.data);
+  const owner = OWNERS[c.kind];
+  return ctx.note(`That's for ${owner ?? 'another app'}: paste it into ${owner ?? 'its'}'s prompt (${describeContext(c)}).`, 'error');
+}
+
+const NO_FILE = 'Open a .http file first: /open <file>, or /new for an example.';
+
+/** The variable the picked environment names the API's address with ({{host}}, {{baseUrl}}), or null. */
+const environmentHost = (ctx) => hostVariable(ctx.data?.environments.vars(ctx.environment()) ?? {});
+
+/**
+ * /take request: a request (Sonar copies them from its logs and incidents) added to the end of the file
+ * as `### replay <METHOD> <path>` and picked, ready to send. When the environment says where the API is
+ * ({{host}}, {{baseUrl}}), it's asked whether to send it there or to where it came from.
+ */
+async function takeRequest(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  if (!data?.url) return ctx.note('That request has no URL.', 'error');
+  const hostVar = environmentHost(ctx);
+  const add = (useHost) => {
+    const { block, dropped } = replayBlock(data, { hostVar: useHost ? hostVar : null });
+    const at = ctx.appendRequests(block);
+    if (at < 0) return;
+    ctx.goToRequest(at);
+    const title = block.split('\n')[0].replace(/^###\s*/, '');
+    ctx.note(`Added ${title} to ${ctx.data.name}: ↵ sends it${dropped.length ? `\nLeft out ${dropped.join(', ')}: credentials don't travel between apps` : ''}`, 'ok');
+  };
+  if (!hostVar) return add(false);
+  const env = ctx.environment();
+  let origin;
+  try {
+    origin = new URL(data.url).origin;
+  } catch {
+    origin = data.url;
+  }
+  ctx.showPicker({
+    title: `Replay ${String(data.method ?? 'GET').toUpperCase()} ${data.url}`,
+    hint: '↵ add it',
+    items: [
+      { useHost: true, segments: [{ text: `To ${env ?? 'the environment'}`, strong: true }, { text: `  {{${hostVar}}} = ${ctx.data.environments.vars(env)[hostVar]}`, color: theme.dim }] },
+      { useHost: false, segments: [{ text: 'As it came', strong: true }, { text: `  ${origin}`, color: theme.dim }] },
+    ],
+    onPick: (it) => {
+      ctx.closeOverlay();
+      add(it.useHost);
+    },
+  });
 }

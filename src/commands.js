@@ -16,6 +16,7 @@ export const COMMANDS = [
   { name: 'cookies', args: '[clear]', desc: 'The cookies kept for this file and environment (clear forgets them)', run: (ctx, s) => a.cookies(ctx, s) },
   { name: 'history', args: '[clear]', desc: 'The responses kept for this file (clear forgets them)', run: (ctx, s) => (s.trim() === 'clear' ? a.clearHistory(ctx) : ctx.setView('history')) },
   { name: 'draft', args: '<openapi.json|url|file> [what to write]', desc: 'Claude writes requests from an API description, for you to look over and add to the file', run: (ctx, s) => a.draft(ctx, s) },
+  { name: 'take', args: '<family:v1:…>', desc: 'Take what a sibling app copied: a request from Sonar (replayed), rows from Trawl (a body), a log line from Bosun (its response in History)', run: (ctx, s) => a.take(ctx, s) },
   { name: 'run', args: '<command>', desc: 'Run a shell command (as ! does)', run: (ctx, s) => a.raw(ctx, s) },
   { name: 'last', desc: 'All the output of the last command', run: (ctx) => ctx.showLast() },
   { name: 'settings', desc: 'Accent colour, theme, mouse, updates, notifications, history', run: (ctx) => a.settings(ctx) },
