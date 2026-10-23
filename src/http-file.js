@@ -151,7 +151,17 @@ function withPlaceholders(text, kind) {
  * handler) and placeholder ({{...}}). Plain text has no kind.
  */
 export function highlight(text) {
-  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  return highlightLines(String(text).replace(/\r\n?/g, '\n').split('\n'));
+}
+
+/**
+ * highlight's runs for `lines[from]` up to (not including) `lines[to]`, read from the ### line at or
+ * above `from`, where each request starts afresh: so the editor colours the rows on screen without
+ * reading the whole file on every key.
+ */
+export function highlightLines(lines, from = 0, to = lines.length) {
+  let start = Math.max(0, Math.min(from, lines.length - 1));
+  while (start > 0 && !SEPARATOR.test(lines[start])) start--;
   // Where in its request each line is: before the request line, the query lines, headers, body. In
   // the body, a multipart boundary and whether the line is among a part's headers; a GraphQL query.
   let state = 'pre';
@@ -163,10 +173,11 @@ export function highlight(text) {
     const h = /^(\s*[^:\s][^:]*?)(\s*:\s*)(.*)$/.exec(l);
     return h ? [...withPlaceholders(h[1], 'header'), { text: h[2] }, ...withPlaceholders(h[3], 'value')] : withPlaceholders(l, undefined);
   };
-  const runs = lines.map((l) => {
+  const runs = lines.slice(start, to).map((l) => {
     if (SEPARATOR.test(l)) {
       state = 'pre';
       boundary = null;
+      partHeaders = false;
       graphql = false;
       return [{ text: l, kind: 'separator' }];
     }
@@ -221,7 +232,7 @@ export function highlight(text) {
     if (h && /^x-request-type$/i.test(h[1]) && /^graphql$/i.test(h[2])) graphql = true;
     return headerRuns(l);
   });
-  return runs.map((line) => line.filter((r) => r.text));
+  return runs.slice(from - start).map((line) => line.filter((r) => r.text));
 }
 
 /** The lines (from 0) of the request block row `row` is in: from its ### line, or the top, to the line before the next. */
