@@ -6,9 +6,13 @@ import { formatSize, prettyBody } from '../send.js';
 import { theme } from '../theme.js';
 import { relTime, wrap } from '../text.js';
 
+const PRINTABLE = /^[\x20-\x7e]*$/;
+
 /** A line wrapped to `width`, its indent kept on every part (wrap would drop it, and JSON needs it). */
 export function wrapIndented(line, width) {
   if (!line) return [''];
+  // Most lines fit as they are (wrap would give them back whole), so they skip it.
+  if (line.length <= width && PRINTABLE.test(line)) return [line];
   const indent = /^\s*/.exec(line)[0];
   const room = Math.max(10, width - indent.length);
   return wrap(line.slice(indent.length), room).map((part) => indent + part);
