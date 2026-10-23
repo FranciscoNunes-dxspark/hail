@@ -44,7 +44,7 @@ export function RequestsView({ data, responses, jump = 0, ctx, width, height, ac
   });
 
   const paneW = width - listW;
-  const lines = !sel ? [] : sent ? responseLines(sent, paneW - 4, { contract: ctx.contractFor(sent) }) : requestLines(sel, paneW - 4);
+  const lines = !sel ? [] : sent ? responseLines(sent, paneW - 4, { contract: ctx.contractFor(sent), rows: innerH }) : requestLines(sel, paneW - 4);
   return (
     <>
       <Panel title={data.name} hint={`${requests.length}`} width={listW} height={height} focused={active}>

@@ -146,3 +146,22 @@ test('a file parsed again after an edit reads as it does parsed afresh, and chan
   const twice = parseHttpFile('###\nGET /a\n###\nGET /a\n');
   assert.deepEqual(twice.requests.map((r) => [r.index, r.line]), [[0, 2], [1, 4]]);
 });
+
+test("a pane's first rows of a body are the whole body's first rows, worked out alone or taken from it", () => {
+  const bodies = ['', 'one line', 'ends in a newline\n', 'a\n\nb\n\n', JSON.stringify({ text: 'word '.repeat(50), list: [1, 2, 3] }), 'x'.repeat(300)];
+  for (const body of bodies) {
+    for (const width of [10, 40]) {
+      const fresh = () => ({ status: 200, statusText: 'OK', headers: [['Content-Type', /^\{/.test(body) ? 'application/json' : 'text/plain']], body, ms: 1, size: body.length, url: 'u' });
+      const whole = bodyLines(fresh(), width);
+      for (const rows of [0, 1, 2, 3, 5, 100]) {
+        assert.deepEqual(bodyLines(fresh(), width, rows), whole.slice(0, rows), `${JSON.stringify(body.slice(0, 20))} ${width}×${rows} alone`);
+        const r = fresh();
+        bodyLines(r, width);
+        assert.deepEqual(bodyLines(r, width, rows), whole.slice(0, rows), 'from the whole');
+      }
+      const sent = { request: { method: 'GET', url: 'u' }, response: fresh(), at: Date.now() };
+      const all = responseLines(sent, width);
+      assert.deepEqual(responseLines(sent, width, { rows: 3 }), all.slice(0, all.length - whole.length + 3).slice(0, all.length));
+    }
+  }
+});

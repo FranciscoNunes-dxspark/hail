@@ -416,7 +416,7 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
   const pane = !paneW
     ? null
     : sent
-      ? responseLines(sent, paneW - 4)
+      ? responseLines(sent, paneW - 4, { rows: innerH })
       : current
         ? [[{ text: 'ctrl+r sends ', color: theme.dim }, { text: current.label, bold: true }], [{ text: 'What comes back shows here.', color: theme.dim }]]
         : [[{ text: 'Put the cursor in a request (### starts one) to send it.', color: theme.dim }]];

@@ -59,9 +59,9 @@ export function contractLines(result) {
 /**
  * `sent` ({ response, request, at, checks }) as lines `width` wide: the status, how its tests went,
  * how it compares with the contract (`contract`, when there is one), then the body. `headers` shows
- * the response's headers too.
+ * the response's headers too; `rows` says only that many of the body's lines are needed (at least).
  */
-export function responseLines(sent, width, { headers = false, contract = null } = {}) {
+export function responseLines(sent, width, { headers = false, contract = null, rows = Infinity } = {}) {
   const r = sent.response;
   const out = [
     [
@@ -80,24 +80,44 @@ export function responseLines(sent, width, { headers = false, contract = null } 
   out.push(...contractLines(contract));
   if (headers) for (const [k, v] of r.headers) out.push([{ text: `${k}: `, color: theme.dim }, { text: v }]);
   out.push([]);
-  return out.concat(bodyLines(r, width));
+  return out.concat(bodyLines(r, width, rows));
 }
 
-// A big body takes a while to indent and wrap, and the views draw on every key, so its lines are
-// kept for each response (until it's gone) at the last few widths it was drawn at.
-const BODIES = new WeakMap();
+// A big body takes a while to indent and wrap, and the views draw on every key, so for each response
+// (until it's gone) its pretty-printed body is kept, and its lines at the last few widths drawn whole.
+const KEPT = new WeakMap();
 const WIDTHS = 4;
 
-/** The body of response `r` as lines `width` wide (JSON indented), the same array each time. */
-export function bodyLines(r, width) {
-  let byWidth = BODIES.get(r);
-  if (!byWidth) BODIES.set(r, (byWidth = new Map()));
-  let lines = byWidth.get(width);
-  if (!lines) {
-    lines = [];
-    for (const l of prettyBody(r).split('\n')) for (const part of wrapIndented(l, width)) lines.push([{ text: part }]);
-    if (byWidth.size >= WIDTHS) byWidth.delete(byWidth.keys().next().value);
-    byWidth.set(width, lines);
+const keptFor = (r) => {
+  let k = KEPT.get(r);
+  if (!k) KEPT.set(r, (k = { pretty: null, widths: new Map() }));
+  return k;
+};
+
+/**
+ * The body of response `r` as lines `width` wide (JSON indented), the same array each time. With
+ * `rows`, only the first `rows` of them, which a pane showing the top of it needs: worked out without
+ * wrapping the rest, unless the whole is kept already.
+ */
+export function bodyLines(r, width, rows = Infinity) {
+  const k = keptFor(r);
+  const whole = k.widths.get(width);
+  if (whole) return rows < whole.length ? whole.slice(0, rows) : whole;
+  k.pretty ??= prettyBody(r);
+  const text = k.pretty;
+  if (rows !== Infinity) {
+    const out = [];
+    for (let at = 0; at <= text.length && out.length < rows; ) {
+      let end = text.indexOf('\n', at);
+      if (end < 0) end = text.length;
+      for (const part of wrapIndented(text.slice(at, end), width)) out.push([{ text: part }]);
+      at = end + 1;
+    }
+    return out.slice(0, rows);
   }
+  const lines = [];
+  for (const l of text.split('\n')) for (const part of wrapIndented(l, width)) lines.push([{ text: part }]);
+  if (k.widths.size >= WIDTHS) k.widths.delete(k.widths.keys().next().value);
+  k.widths.set(width, lines);
   return lines;
 }
