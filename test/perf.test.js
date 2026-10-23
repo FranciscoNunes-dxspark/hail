@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { basePaths, deref, findOperation } from '../src/contract.js';
 import { readHistory } from '../src/history.js';
+import { parseYaml } from '../src/yaml.js';
 import { send } from '../src/send.js';
 import { highlight, highlightLines, parseHttpFile } from '../src/http-file.js';
 import { wrap } from '../src/text.js';
@@ -216,4 +217,10 @@ test('a $ref leads where it led the first time, through chains, escapes and dead
   assert.equal(deref(null, { $ref: '#/x' }), null);
   // Another spec has its own answers.
   assert.deepEqual(deref({ components: { schemas: { A: { type: 'number' } } } }, { $ref: '#/components/schemas/A' }), { type: 'number' });
+});
+
+test('double-quoted YAML without a backslash reads as it always did, and with one is still unescaped', () => {
+  assert.deepEqual(parseYaml('"a b": "c: d # e"\n"x": ""\ny: "tab\there"\nz: "say \\"hi\\"\\n"\nw: "\\u00e9t\\x41"\n'), { 'a b': 'c: d # e', x: '', y: 'tab  here', z: 'say "hi"\n', w: 'étA' });
+  assert.deepEqual(parseYaml('k: "one\n  two"\n'), { k: 'one two' });
+  assert.deepEqual(parseYaml('list: ["a", "b, c", \'d\']\n'), { list: ['a', 'b, c', 'd'] });
 });

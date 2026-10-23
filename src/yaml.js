@@ -3,7 +3,11 @@
 // comments. Anchors, aliases, tags and documents after the first aren't read. Pure.
 
 const KEY = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"{[\]-][^#]*?|-[^\s#][^#]*?)\s*:(?=\s|$)/;
-const indentOf = (s) => /^ */.exec(s)[0].length;
+const indentOf = (s) => {
+  let n = 0;
+  while (s.charCodeAt(n) === 32) n++;
+  return n;
+};
 const blank = (s) => !s.trim() || /^\s*#/.test(s) || /^(---|\.\.\.)(\s.*)?$/.test(s);
 const isItem = (t) => t === '-' || t.startsWith('- ');
 
@@ -21,6 +25,9 @@ function plain(s) {
 function unquote(s) {
   if (s.startsWith("'")) return s.slice(1, -1).replace(/''/g, "'");
   if (s.startsWith('"')) {
+    // Without a backslash there's nothing to unescape: JSON.parse would give back what's between the
+    // quotes, or fail and leave it to the slice below.
+    if (!s.includes('\\')) return s.slice(1, -1);
     try {
       return JSON.parse(s.replace(/\\x([0-9a-fA-F]{2})/g, '\\u00$1').replace(/\\([0e ])/g, (_, c) => ({ 0: '\\u0000', e: '\\u001b', ' ': ' ' })[c]));
     } catch {
