@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KEYS, start, tempHome, type, until } from './helpers.js';
+import { applyTheme, theme } from '../src/theme.js';
 
 let cleanup;
 let dir;
@@ -166,7 +167,7 @@ test('! runs a shell command, with its output in the activity lines, and esc can
   }
 });
 
-test('settings: a toggle saves, the accent changes through its command', async () => {
+test('settings: the theme goes round, a toggle saves, the accent changes through its command', async () => {
   const app = start({ initialFile: join(dir, 'api.http') });
   const frame = () => app.lastFrame() ?? '';
   try {
@@ -174,12 +175,23 @@ test('settings: a toggle saves, the accent changes through its command', async (
     app.stdin.write(',');
     await until(() => frame().includes('Accent colour'), 'the settings');
     app.stdin.write('j');
+    await until(() => /❯ Theme\s+auto \((dark|light) here\)\s+↵ dark next/.test(frame()), 'the cursor on Theme');
+    app.stdin.write(KEYS.enter);
+    await until(() => /❯ Theme\s+dark\s+↵ light next/.test(frame()), 'dark');
+    app.stdin.write(KEYS.enter);
+    await until(() => /❯ Theme\s+light\s+↵ auto next/.test(frame()), 'light');
+    assert.equal(theme.mode, 'light', 'the palette changed');
+    assert.match(frame(), /Accent colour\s+■ #c4203a \(default\)/, "the light theme's accent");
+    app.stdin.write(KEYS.enter);
+    await until(() => /❯ Theme\s+auto/.test(frame()), 'auto again');
+    app.stdin.write('j');
     await until(() => /❯ Mouse\s+on/.test(frame()), 'the cursor on Mouse');
     app.stdin.write(KEYS.enter);
     await until(() => /❯ Mouse\s+off/.test(frame()), 'the mouse off');
     const saved = () => JSON.parse(readFileSync(join(process.env.HAIL_HOME, 'config.json'), 'utf8'));
     assert.equal(saved().mouse, false);
 
+    app.stdin.write('k');
     app.stdin.write('k');
     await until(() => /❯ Accent colour/.test(frame()), 'the cursor on the accent');
     app.stdin.write(KEYS.enter);
@@ -189,7 +201,9 @@ test('settings: a toggle saves, the accent changes through its command', async (
     app.stdin.write(KEYS.enter);
     await until(() => frame().includes('#5fafff'), 'the new accent in the list');
     assert.equal(saved().accent, '#5fafff');
+    assert.equal(saved().theme, 'auto');
   } finally {
     app.unmount();
+    applyTheme({});
   }
 });

@@ -3,7 +3,7 @@ import { render } from 'ink';
 import { resolve } from 'node:path';
 import { COMPILED, VERSION } from './version.js';
 import { loadConfig } from './config.js';
-import { setAccent } from './theme.js';
+import { applyTheme } from './theme.js';
 import { App } from './ui/App.jsx';
 import { findHttpFiles } from './files.js';
 import { ask } from './claude.js';
@@ -51,7 +51,8 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 }
 
 const config = loadConfig();
-setAccent(config.accent);
+// The theme (dark, light, or auto from the terminal) and the accent, before anything is drawn.
+applyTheme(config);
 
 // Draw on the alternate screen, like a full-screen app, and give the terminal back untouched on exit.
 // The window title is saved on the terminal's title stack and popped on exit. Terminals without one

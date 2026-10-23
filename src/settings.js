@@ -1,21 +1,34 @@
 // The /settings list: every setting, its value and what ↵ does with it. Pure, so the list is tested
 // without the UI; actions.js shows it in a picker and makes the changes.
-import { DEFAULT_ACCENT, theme } from './theme.js';
+import { THEMES, defaultAccent, theme } from './theme.js';
 import { fit } from './text.js';
 
 const isOn = (value) => value !== false;
+
+/** The Theme setting: dark, light, or auto (the default: COLORFGBG says, else dark). */
+export const themeSetting = (config) => (THEMES.includes(config.theme) ? config.theme : 'auto');
+
+/** What ↵ on the Theme row changes it to: dark, light, auto, round again. */
+export const nextTheme = (config) => THEMES[(THEMES.indexOf(themeSetting(config)) + 1) % THEMES.length];
 const count = (n, one, many = `${one}s`) => (n ? `${n} ${n === 1 ? one : many}` : 'none');
 
 /**
  * The rows, from the config: { id, label, value, note, action }, where `action` is what ↵ does:
- * 'toggle' (an on/off setting named `id`), 'accent', 'clear' (the list named `id`) or 'none'.
+ * 'toggle' (an on/off setting named `id`), 'accent', 'theme', 'clear' (the list named `id`) or 'none'.
  * `mouse`: whether this terminal can report the mouse at all.
  */
 export function settingRows(config, { file = '', mouse = true } = {}) {
   const history = config.history ?? [];
   const checks = isOn(config.checkForUpdates);
   return [
-    { id: 'accent', label: 'Accent colour', value: config.accent ?? `${DEFAULT_ACCENT} (default)`, colour: config.accent ?? DEFAULT_ACCENT, note: 'type a new one', action: 'accent' },
+    { id: 'accent', label: 'Accent colour', value: config.accent ?? `${defaultAccent()} (default)`, colour: config.accent ?? defaultAccent(), note: 'type a new one', action: 'accent' },
+    {
+      id: 'theme',
+      label: 'Theme',
+      value: themeSetting(config) === 'auto' ? `auto (${theme.mode} here)` : themeSetting(config),
+      note: `${nextTheme(config)} next${nextTheme(config) === 'auto' ? ': from the terminal, else dark' : ''}`,
+      action: 'theme',
+    },
     {
       id: 'mouse',
       label: 'Mouse',

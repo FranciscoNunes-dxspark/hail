@@ -13,7 +13,7 @@ export const HELP = [
       ['!', 'Run a shell command, e.g.  !node --version'],
       ['r', 'Read the file again (it also reloads by itself when saved)'],
       ['esc', 'Cancel the request on its way, or clear the activity lines'],
-      [',', 'Settings (/settings): accent colour, mouse, updates, history'],
+      [',', 'Settings (/settings): accent colour, theme (dark, light, or auto from the terminal), mouse, updates, history'],
       ['?', 'This help'],
       ['q / ctrl+c', 'Quit'],
       ['mouse', 'Click a tab, a row or the prompt · double-click does ↵ · the wheel scrolls\ndrag to select text, copied when you let go'],

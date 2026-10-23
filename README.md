@@ -350,7 +350,7 @@ and Trawl.
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
-| `/settings` | Accent colour, mouse, updates, history |
+| `/settings` | Accent colour, theme, mouse, updates, history |
 | `/accent <#rrggbb>` | Change the accent colour (`default` puts it back) |
 | `/update` | Look for a new version now and install it |
 | `/help` | Keys and commands |
@@ -364,6 +364,7 @@ picked for each file, the files opened lately and the names (never the values) o
 | Setting | |
 | --- | --- |
 | Accent colour | The colour of the cursor, borders and Hoot |
+| Theme | Dark, light, or auto: light when the terminal says its background is (`COLORFGBG`, which many set), else dark. `↵` goes round them |
 | Mouse | Off leaves selecting text to the terminal |
 | Check for new versions | Once a day, in the downloaded builds |
 | Install them by itself | Off only says a new version is out |
