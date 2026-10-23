@@ -17,10 +17,11 @@ function testsSegment(checks) {
 }
 
 /** The responses kept for the open file, newest first. */
-export function HistoryView({ entries, data, ctx, width, height, active }) {
+export function HistoryView({ entries, data, focus = null, ctx, width, height, active }) {
   const list = [...entries].reverse();
   const innerH = height - 2;
-  const nav = useListNav(list.length, innerH, { resetKey: data?.path });
+  // `focus` ({ entry, n }): an entry to put the cursor on (/take logline found it).
+  const nav = useListNav(list.length, innerH, { resetKey: `${data?.path}#${focus?.n ?? 0}`, start: Math.max(0, focus ? list.indexOf(focus.entry) : 0) });
   const sel = list[nav.index];
   const labelW = Math.min(36, Math.max(10, ...list.map((e) => e.label.length)));
 

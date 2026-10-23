@@ -20,7 +20,7 @@ import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
 import { contextIn, describeContext } from './family.js';
-import { OWNERS, hostVariable, replayBlock, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
+import { OWNERS, findByRequestId, hostVariable, idsIn, replayBlock, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -527,6 +527,7 @@ export async function take(ctx, rest) {
   if (!c) return ctx.note("That isn't something a sibling app copied (they start family:v1:).", 'error');
   if (c.kind === 'request') return takeRequest(ctx, c.data);
   if (c.kind === 'rows') return takeRows(ctx, c.data);
+  if (c.kind === 'logline') return takeLogline(ctx, c.data);
   const owner = OWNERS[c.kind];
   return ctx.note(`That's for ${owner ?? 'another app'}: paste it into ${owner ?? 'its'}'s prompt (${describeContext(c)}).`, 'error');
 }
@@ -606,4 +607,19 @@ function takeRows(ctx, data) {
       ctx.note(`Added a POST of ${what} to ${ctx.data.name}: ctrl+z in Edit undoes it`, 'ok');
     },
   });
+}
+
+/**
+ * /take logline: a log line Bosun copied, found in the History by its request id (`requestId`, else the
+ * ids in its text): the newest response whose request or response headers carry it (X-Request-Id,
+ * Request-Id, traceparent, correlation ids), shown with the cursor on it.
+ */
+function takeLogline(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  const ids = data?.requestId ? [String(data.requestId)] : idsIn(data?.text);
+  if (!ids.length) return ctx.note(`That log line has no request id to look for: ${String(data?.text ?? '').slice(0, 80)}`, 'error');
+  const found = findByRequestId(ctx.history(), ids);
+  if (!found) return ctx.note(`No response kept for ${ctx.data.name} carries ${ids.join(' or ')}.\nHistory keeps the newest 300; the request may have come from somewhere else.`, 'error');
+  ctx.showHistoryEntry(found.entry);
+  ctx.note(`${found.entry.label}, ${new Date(found.entry.at).toLocaleString()}: its ${found.header} is ${ids.length === 1 ? ids[0] : 'the one in the log line'}`, 'ok');
 }

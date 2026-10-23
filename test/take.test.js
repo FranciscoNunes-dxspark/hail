@@ -139,3 +139,32 @@ test('/take rows: a new POST of them, or the body of the request under the curso
     app.unmount();
   }
 });
+
+test('/take logline finds the response whose headers carry its request id, or says none does', async () => {
+  const file = join(dir, 'ids.http');
+  writeFileSync(file, '### First\nGET {{host}}/first\nX-Request-Id: client-aaaa-1111\n\n### Second\nGET {{host}}/second\n');
+  const app = start({ initialFile: file });
+  const frame = () => app.lastFrame() ?? '';
+  try {
+    await until(() => frame().includes('First'), 'the requests');
+    app.stdin.write('A');
+    await until(() => frame().includes('Sent all'), 'both sent');
+    app.stdin.write(KEYS.esc);
+    await until(() => !frame().includes('Sent all:'), 'the report closed');
+    const second = seen.length;
+    await run(app, takeLine('logline', { process: 'api', text: `GET /second 200 rid-${second}-0000` , requestId: `rid-${second}-0000` }));
+    await until(() => frame().includes('its x-request-id is'), 'the entry found');
+    assert.match(frame(), /GET \/second|Second/);
+    app.stdin.write(KEYS.esc);
+    await until(() => frame().includes('─ History'), 'the History view');
+    assert.match(frame(), /❯.*Second/);
+    await run(app, takeLine('logline', { process: 'api', text: 'handled request_id=client-aaaa-1111 in 3 ms' }));
+    await until(() => frame().includes('First,'), 'the id from the text');
+    app.stdin.write(KEYS.esc);
+    await until(() => /❯.*First/.test(frame()), 'the cursor on it');
+    await run(app, takeLine('logline', { process: 'api', text: 'x', requestId: 'zzzzzzzz' }));
+    await until(() => frame().includes('carries zzzzzzzz'), 'none found');
+  } finally {
+    app.unmount();
+  }
+});

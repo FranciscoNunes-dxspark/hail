@@ -152,6 +152,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const selectedRef = useRef(0);
   // Counts goToRequest's jumps, so the Requests view moves its cursor even while it's on screen.
   const [jump, setJump] = useState(0);
+  // The History entry to put the cursor on (/take logline), counted so it moves even while on screen.
+  const [historyFocus, setHistoryFocus] = useState(null);
   const fileRef = useRef(initialFile ?? null);
   // The responses kept for the open file, oldest first (history.js), and the file they're kept in.
   const [history, setHistory] = useState([]);
@@ -574,6 +576,12 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       setHistory(historyRef.current.entries);
     },
     history: () => historyRef.current.entries,
+    // The History view, its cursor on `entry`, and the entry shown.
+    showHistoryEntry: (entry) => {
+      setHistoryFocus((f) => ({ entry, n: (f?.n ?? 0) + 1 }));
+      setView('history');
+      a.showEntry(ctx, entry);
+    },
     clearHistory: () => {
       const h = historyRef.current;
       if (h.file) clearHistory(h.file);
@@ -1077,7 +1085,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       </Panel>
     );
   } else if (view === 'history') {
-    main = <HistoryView entries={history} data={data} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+    main = <HistoryView entries={history} data={data} focus={historyFocus} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else if (view === 'edit') {
     main = <EditView data={data} responses={responses} editor={editor} editing={focus === 'editor'} ctx={ctx} width={W} height={mainH} active={(viewActive || focus === 'editor') && !overlay && !confirmReq} />;
   } else if (view === 'response') {
