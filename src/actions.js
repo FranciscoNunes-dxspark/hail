@@ -69,7 +69,7 @@ async function prepared(ctx, request) {
 
 /** Sends a filled-in request with what the session holds for it, and keeps what came back. */
 async function exchangeFor(ctx, request, req, signal) {
-  const out = await exchange(req, { signal, globals: ctx.globals() });
+  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar() });
   ctx.setGlobals(out.globals);
   ctx.setResponse(request, req, out.response, { checks: out.checks });
   return out;
@@ -311,6 +311,33 @@ export async function importCurl(ctx, text) {
   const title = block.split('\n')[0].replace(/^###\s*/, '');
   const left = parsed.ignored.length ? `\nLeft out: ${parsed.ignored.join(', ')}${parsed.ignored.includes('-k') ? ' (an environment\'s "SSLConfiguration": { "verifyHostCertificate": false } skips checking certificates)' : ''}` : '';
   ctx.note(`Added ${title} to ${ctx.data.name}${left}`, 'ok');
+}
+
+/** /cookies [clear]: the cookies kept for this file and environment, or forgets them. */
+export function cookies(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const jar = ctx.cookieJar();
+  const env = ctx.environment();
+  const where = `${ctx.data.name}${env ? ` in ${env}` : ''}`;
+  if (rest.trim() === 'clear') {
+    const n = jar.clear();
+    return ctx.note(n ? `Forgot the ${n} cookie${n === 1 ? '' : 's'} kept for ${where}` : `No cookies kept for ${where}.`);
+  }
+  if (rest.trim()) return ctx.note('/cookies shows them; /cookies clear forgets them.', 'error');
+  const list = jar.list();
+  if (!list.length) return ctx.note(`No cookies kept for ${where} yet: a response's Set-Cookie puts them here.`);
+  const lines = [];
+  let site = null;
+  for (const c of list) {
+    if (c.domain !== site) {
+      if (site !== null) lines.push([]);
+      site = c.domain;
+      lines.push([{ text: `${c.hostOnly ? '' : '.'}${c.domain}`, bold: true, color: theme.accent }]);
+    }
+    const flags = [c.path, c.expires === null ? 'until Hail closes' : `until ${new Date(c.expires).toLocaleString()}`, c.secure ? 'https only' : '', c.httpOnly ? 'HttpOnly' : ''].filter(Boolean).join(' · ');
+    lines.push([{ text: `  ${c.name}`, bold: true }, { text: `=${c.value}` }, { text: `  ${flags}`, color: theme.dim }]);
+  }
+  ctx.showText(`Cookies: ${where} · ${list.length}`, list.map((c) => `${c.domain}\t${c.path}\t${c.name}=${c.value}`).join('\n'), { lines });
 }
 
 /** e and /env: the environment the variables come from, named or picked from a list. */

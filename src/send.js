@@ -36,14 +36,21 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
       handlers.push({ script: await read(at(path)), name: basename(path) });
     }
   }
-  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used], handlers };
+  return { method: request.method, url, headers, body, missing: [...new Set(missing)], secrets: [...used], handlers, options: request.options ?? {} };
 }
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 20;
+const has = (headers, name) => headers.some(([k]) => k.toLowerCase() === name);
 
 /**
  * Sends a prepared request with `fetch`, resolving with { status, statusText, headers: [[name, value]],
- * body, ms, size, url }; `url` is where it ended up after redirects. `signal` cancels it.
+ * body, raw, ms, size, url, redirects }; `url` is where it ended up after redirects, `raw` the body's
+ * bytes. Redirects are followed here rather than by fetch, so that a cookie `jar` (cookies.js) sees
+ * the Set-Cookie of every response on the way and sends its cookies to each hop, unless the request
+ * sets Cookie itself. `follow: false` gives back the redirect itself. `signal` cancels it.
  */
-export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now() } = {}) {
+export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now(), jar = null, follow = true } = {}) {
   let url;
   try {
     url = new URL(req.url).href;
@@ -51,16 +58,38 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     throw new Error(`${req.url} isn't a URL${/\{\{/.test(req.url) ? ' (a variable in it has no value)' : ''}`);
   }
   const started = now();
+  let method = req.method;
+  let headers = req.headers;
+  let body = req.payload ?? req.body;
   let res;
   let bytes;
+  let redirects = 0;
   try {
-    res = await fetch(url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body && !['GET', 'HEAD'].includes(req.method) ? req.body : undefined,
-      redirect: 'follow',
-      signal,
-    });
+    for (;;) {
+      const cookie = jar && !has(headers, 'cookie') ? jar.header(url) : '';
+      res = await fetch(url, {
+        method,
+        headers: cookie ? [...headers, ['Cookie', cookie]] : headers,
+        body: body && body.length && !['GET', 'HEAD'].includes(method) ? body : undefined,
+        redirect: 'manual',
+        signal,
+      });
+      jar?.store(res.headers.getSetCookie?.() ?? [], url);
+      const location = res.headers.get('location');
+      if (!follow || !REDIRECTS.has(res.status) || !location || redirects >= MAX_REDIRECTS) break;
+      await res.arrayBuffer().catch(() => {});
+      const next = new URL(location, url);
+      // As browsers do: 303, and 301 or 302 after a POST, go on as a GET without the body.
+      if ((res.status === 303 && method !== 'HEAD') || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+        method = 'GET';
+        body = undefined;
+        headers = headers.filter(([k]) => !/^content-(type|length|encoding|language|location)$/i.test(k));
+      }
+      // Credentials don't follow a redirect to another site.
+      if (next.origin !== new URL(url).origin) headers = headers.filter(([k]) => !/^(authorization|cookie|proxy-authorization)$/i.test(k));
+      url = next.href;
+      redirects++;
+    }
     bytes = Buffer.from(await res.arrayBuffer());
   } catch (e) {
     if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
@@ -71,9 +100,11 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     statusText: res.statusText,
     headers: [...res.headers.entries()],
     body: bytes.toString('utf8'),
+    raw: bytes,
     ms: Math.round(now() - started),
     size: bytes.length,
-    url: res.url || url,
+    url,
+    redirects,
   };
 }
 

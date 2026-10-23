@@ -97,6 +97,14 @@ export const HELP = [
     ],
   },
   {
+    title: 'Cookies and directives',
+    about: "cookies kept as a browser keeps them; directives are comments before a request's line or among its headers",
+    rows: [
+      ['cookies', 'Set-Cookie is kept per file and environment while Hail runs, and sent on to the same site (unless the request sets Cookie)\n/cookies lists them · /cookies clear forgets them · redirects are followed with them'],
+      ['# @no-cookie-jar', "This request neither sends the jar's cookies nor keeps the ones it gets"],
+    ],
+  },
+  {
     title: 'Response checks',
     about: "JetBrains' response handlers, after a request's body; run in a sandbox when the response comes",
     rows: [

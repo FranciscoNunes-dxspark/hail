@@ -5,6 +5,7 @@
 import { resolve } from 'node:path';
 import { azToken as azCli } from './azure.js';
 import { loadConfig } from './config.js';
+import { createJar } from './cookies.js';
 import { defaultEnvironment } from './environments.js';
 import { findHttpFiles, loadHttpFile } from './files.js';
 import { exchange, reportLines, runFailed } from './runner.js';
@@ -88,6 +89,7 @@ export async function runTests(args, { print = console.log, printError = console
     }
   };
   const responses = {};
+  const jar = createJar();
   let globals = {};
   const results = [];
   let stopped = false;
@@ -105,7 +107,7 @@ export async function runTests(args, { print = console.log, printError = console
       continue;
     }
     try {
-      const out = await exchange(req, { globals });
+      const out = await exchange(req, { globals, jar });
       globals = out.globals;
       if (request.name) responses[request.name] = out.response;
       results.push({ request, response: out.response, checks: out.checks });

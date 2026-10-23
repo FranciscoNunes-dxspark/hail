@@ -175,6 +175,16 @@ isn't there). Without `--env` it uses the environment Hail would pick (the one c
 file, else dev or local). Nothing is kept in the history. `{{$secret}}` reads the system's store as Hail
 does; on a build server, `{{$processEnv NAME}}` is usually the way to hand it a secret.
 
+### Cookies
+
+A response's `Set-Cookie` is kept, as a browser keeps it: for the site and path it names, until it
+expires (or, without an expiry, until Hail closes), `Secure` ones only over https. Later requests to
+the same site send them back, unless the request sets `Cookie` itself. Redirects are followed with the
+jar, so a sign-in that sets a cookie and redirects carries on signed in. Each file has a jar per
+environment, in memory only: nothing about them is written anywhere, and the history hides
+`Cookie` and `Set-Cookie` headers. `/cookies` lists them, `/cookies clear` forgets them, and
+`# @no-cookie-jar` above a request (JetBrains') keeps that one out of it: it sends none and keeps none.
+
 ### History
 
 Every response is kept, across runs, in `~/.hail/history` (one file per `.http` file). When a file is
@@ -271,6 +281,7 @@ and Trawl.
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
 | `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |
 | `/history [clear]` | The responses kept for this file (`clear` forgets them) |
+| `/cookies [clear]` | The cookies kept for this file and environment (`clear` forgets them) |
 | `/draft <spec> [what]` | Claude writes requests from an API description, for you to look over and add |
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/run <command>` | Run a shell command (as `!` does) |

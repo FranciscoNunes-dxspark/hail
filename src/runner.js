@@ -7,10 +7,12 @@ import { send } from './send.js';
 /**
  * Sends `req` (send.js's prepare) and runs its handlers. Resolves with { response, checks, globals }:
  * `checks` is null without handlers, `globals` the global variables afterwards (from `globals`).
- * Throws what send throws (no answer, cancelled).
+ * `jar` keeps cookies (cookies.js) unless the request says `# @no-cookie-jar`. Throws what send throws
+ * (no answer, cancelled).
  */
-export async function exchange(req, { signal, globals = {}, fetch } = {}) {
-  const response = await send(req, { signal, fetch });
+export async function exchange(req, { signal, globals = {}, fetch, jar = null } = {}) {
+  const options = req.options ?? {};
+  const { raw: _, ...response } = await send(req, { signal, fetch, jar: options['no-cookie-jar'] ? null : jar });
   let checks = null;
   let after = globals;
   if (req.handlers?.length) {

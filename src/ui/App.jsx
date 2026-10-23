@@ -14,6 +14,7 @@ import { HELP } from '../help.js';
 import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
+import { createJar } from '../cookies.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
@@ -135,6 +136,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // What came back, by request label: { request, response, at }, `request` as it was sent.
   const [responses, setResponses] = useState({});
   const responsesRef = useRef({});
+  // Cookie jars (cookies.js), one per file and environment, for as long as Hail runs.
+  const jarsRef = useRef(new Map());
   // client.global.set's variables: kept for the open file until another is opened or Hail closes.
   const globalsRef = useRef({});
   const selectedRef = useRef(0);
@@ -454,6 +457,12 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         responses: named,
         env: { azToken, secret: (name) => credentials.get(name) },
       };
+    },
+    // The cookies kept for the open file in the environment picked.
+    cookieJar: () => {
+      const key = `${dataRef.current?.path ?? ''}\n${environment() ?? ''}`;
+      if (!jarsRef.current.has(key)) jarsRef.current.set(key, createJar());
+      return jarsRef.current.get(key);
     },
     // The global variables response handlers set (client.global.set), for the open file while Hail runs.
     globals: () => globalsRef.current,

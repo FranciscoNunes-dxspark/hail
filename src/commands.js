@@ -11,6 +11,7 @@ export const COMMANDS = [
   { name: 'open', args: '<file.http>', desc: 'Open another .http file', complete: 'files', run: (ctx, s) => a.open(ctx, s) },
   { name: 'new', args: '[file.http]', desc: 'Write an example .http file to start from (requests.http) and open it', run: (ctx, s) => a.newFile(ctx, s) },
   { name: 'secret', args: '[name]', desc: 'Save a secret in the system\'s store for {{$secret name}} (the saved ones, to replace or forget, if none is named)', run: (ctx, s) => a.secret(ctx, s) },
+  { name: 'cookies', args: '[clear]', desc: 'The cookies kept for this file and environment (clear forgets them)', run: (ctx, s) => a.cookies(ctx, s) },
   { name: 'history', args: '[clear]', desc: 'The responses kept for this file (clear forgets them)', run: (ctx, s) => (s.trim() === 'clear' ? a.clearHistory(ctx) : ctx.setView('history')) },
   { name: 'draft', args: '<openapi.json|url|file> [what to write]', desc: 'Claude writes requests from an API description, for you to look over and add to the file', run: (ctx, s) => a.draft(ctx, s) },
   { name: 'run', args: '<command>', desc: 'Run a shell command (as ! does)', run: (ctx, s) => a.raw(ctx, s) },
