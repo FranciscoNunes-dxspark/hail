@@ -89,6 +89,7 @@ export const HELP = [
     about: 'in the URL, headers and body, as {{name}}',
     rows: [
       ['@name = value', 'A variable of the file, on a line of its own'],
+      ['client.global.set', "Set by an earlier response's handler, it wins over the environment and the file (until Hail closes)"],
       ['http-client.env.json', 'Environments beside the file: { "dev": { "host": "…" } }; "$shared" goes into each\nhttp-client.private.env.json over it, for secrets kept out of git'],
       ['{{login.response.body.token}}', 'From the response to the request named login (# @name login); .headers.Name for a header'],
       ['{{$uuid}} {{$timestamp}}', 'Built-ins; also $isoTimestamp, $randomInt min max, $processEnv NAME, $env.NAME'],

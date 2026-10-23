@@ -139,6 +139,7 @@ another way (`-k`) are named when it's added.
 
 | Where | |
 | --- | --- |
+| Response handlers | `client.global.set("token", …)` in a script after an earlier request (see [Checking responses](#checking-responses)), while Hail runs |
 | The environment | `http-client.env.json` beside the file: `{ "dev": { "host": "http://localhost:3000" }, "prod": { ... } }`, with `"$shared"` going into every one. `http-client.private.env.json` beside it goes over it, for secrets kept out of git. `e` picks the environment; Hail starts on one called dev or local and remembers the choice for each file |
 | The file | `@name = value` lines |
 | Earlier responses | `{{login.response.body.token}}` is the `token` field of what the request named `login` (`# @name login`) got back; a path like `data.items[0].id` (or `$.data…`) reaches further in, `.headers.X-Request-Id` reads a header |
