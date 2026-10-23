@@ -75,7 +75,8 @@ test('a multipart body goes as CRLF lines with its files in it, byte for byte', 
       ['meta', 'meta.json', 'application/json', './meta.json', ''],
     ],
   );
-  assert.equal(toCurl(req, { dir: '/d' }), `curl -X POST '${base}/upload' -F 'title=Holidays' -F 'photo=@/d/dot.png;type=image/png' -F 'meta=@/d/meta.json;type=application/json'`);
+  // The files from the folder given, as this system writes paths.
+  assert.equal(toCurl(req, { dir: '/d' }), `curl -X POST '${base}/upload' -F 'title=Holidays' -F 'photo=@${join('/d', 'dot.png')};type=image/png' -F 'meta=@${join('/d', 'meta.json')};type=application/json'`);
   assert.equal(multipartBoundary([['Content-Type', 'multipart/form-data; boundary="b 1"']]), 'b 1');
   assert.equal(multipartBoundary([['Content-Type', 'application/json']]), null);
   await assert.rejects(prepare(parseHttpFile(MULTIPART(base).replace('dot.png\n--', 'gone.png\n--').replace('< ./dot.png', '< ./gone.png')).requests[0], { file: { title: 't' } }, { dir }), /Couldn't read the file \.\/gone\.png: there's no such file/);

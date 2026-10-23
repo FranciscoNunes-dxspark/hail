@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { encodeContext, familyDir, quoteArg, writeMood } from '../src/family.js';
+import { encodeContext, familyDir, quoteArg, shareLine, writeMood } from '../src/family.js';
 import { pathArg } from '../src/files.js';
 import { familyOffers } from '../src/actions.js';
 import { familyMood, reactionLine } from '../src/pet.js';
@@ -35,8 +35,8 @@ after(() => {
 test('/family offers Splice the checkout, Bosun the project and Trawl each database, never a password', () => {
   const offers = familyOffers(join(dir, 'api'));
   assert.deepEqual(offers.map((o) => [o.app, o.line]), [
-    ['splice', `/open ${dir}`],
-    ['bosun', `/move ${dir}`],
+    ['splice', shareLine('open', [dir])],
+    ['bosun', shareLine('move', [dir])],
     ['trawl', '/azure-sql shop.database.windows.net Shop'],
     ['trawl', '/add Local localhost,1444 Dev --user sa --trust-cert'],
     ['trawl', '/add DATABASE_URL db.local:5433 orders --kind postgres --user me'],
@@ -96,7 +96,7 @@ test('a pasted command or context opens the prompt with it, unrun, from the view
     await new Promise((r) => setTimeout(r, 50));
     app.stdin.write(KEYS.enter);
     await until(() => copied.length === 1, 'the line copied');
-    assert.equal(copied[0], `/move ${dir}`);
+    assert.equal(copied[0], shareLine('move', [dir]));
     await until(() => frame().includes("Copied for Bosun: paste it into Bosun's prompt"), 'what to do with it');
   } finally {
     app.unmount();
