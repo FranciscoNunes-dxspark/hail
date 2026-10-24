@@ -54,7 +54,8 @@ test('/timeline shows the family newest first, p this project alone; Hail logs a
     app.stdin.write('/');
     await type(app.stdin, 'mock 0');
     app.stdin.write(KEYS.enter);
-    await until(() => /mock :\d+/.test(f()), 'the mock');
+    // The header's "mock :port" is cut off beside a long temp path (Windows'), so wait for the note.
+    await until(() => /Mock of api\.http on http:\/\/127\.0\.0\.1:\d+/.test(f()), 'the mock');
     app.stdin.write('/');
     await type(app.stdin, 'mock off');
     app.stdin.write(KEYS.enter);
