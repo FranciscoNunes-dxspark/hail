@@ -112,6 +112,28 @@ connection and the view. The conversation is then kept as the request's response
 history too, with the secrets it carried left out. `Sec-WebSocket-Protocol` asks for subprotocols. A run
 of the whole file (`A`, `hail test`) leaves WebSockets out.
 
+A gRPC call, as JetBrains writes one: `GRPC`, the server's `host:port`, the service's full name and the
+method, headers as the call's metadata, and the request message as JSON:
+
+```http
+### An order
+GRPC localhost:50051/shop.Orders/Get
+Authorization: Bearer {{token}}
+
+{ "orderId": 42 }
+```
+
+Hail learns the service's types from the server's own reflection service (`grpc.reflection.v1`, or the
+older `v1alpha`), so it needs no `.proto` files, but the server must have reflection on. The answer is a
+response like any other: the message as JSON (proto3's JSON: fields by their JSON names, enums by name,
+64-bit numbers as strings, bytes as base64, Timestamp, Duration, the wrappers and Struct as their JSON),
+the metadata and `grpc-status` as headers, and gRPC's status made the nearest HTTP one (`OK` 200,
+`NOT_FOUND` 404, `UNAUTHENTICATED` 401…) with its name and message beside it, so response handlers,
+`/send all`, `hail test` and `/load` work on it. The URL is plain text (HTTP/2 without TLS) unless it
+starts with `grpcs://` or `https://`, which use TLS (`SSLConfiguration` skips the check, as for
+https). Only unary calls are made: a streaming method is refused, saying so; client certificates,
+compressed messages, `google.protobuf.Any` and proto2 groups aren't supported.
+
 A response that's a stream of server-sent events (`Content-Type: text/event-stream`) shows as it comes:
 the Response view opens on it and keeps its newest events on screen (scrolling up stops that, `G` goes
 back), each event under a line with its number, `event:` and `id:`, its data JSON indented, and the

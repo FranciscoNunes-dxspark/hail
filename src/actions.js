@@ -15,6 +15,7 @@ import { previousOf } from './history.js';
 import { run } from './run.js';
 import { checkSummary } from './checks.js';
 import { exchange, inRun, reportLines, runFailed, summaryLine } from './runner.js';
+import { grpcSend } from './grpc.js';
 import { openSocket, socketMessages, socketUrl, transcript } from './websocket.js';
 import { fill } from './variables.js';
 import { loadReport, loadStats, loadSummary, parseLoadArgs, runLoad } from './load.js';
@@ -237,6 +238,7 @@ export async function load(ctx, rest) {
   if (args.problem) return ctx.note(args.problem, 'error');
   const request = requestNamed(ctx, args.name);
   if (!request) return ctx.note(args.name ? `There's no request called ${args.name}.` : 'The file has no requests yet.', 'error');
+  if (!inRun(request)) return ctx.note("A WebSocket isn't something /load sends: it's a connection, opened with ↵.", 'error');
   const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (!req) return;
   const { count, concurrency } = args;
@@ -251,7 +253,7 @@ export async function load(ctx, rest) {
         count,
         concurrency,
         signal,
-        sendOne: (s) => sendRequest(req, { signal: s, jar: null, follow: !options['no-redirect'], timeout: parseTimeout(options.timeout), insecure }),
+        sendOne: (s) => (req.method === 'GRPC' ? grpcSend(req, { signal: s, timeout: parseTimeout(options.timeout), insecure }) : sendRequest(req, { signal: s, jar: null, follow: !options['no-redirect'], timeout: parseTimeout(options.timeout), insecure })),
         onProgress: (results) => {
           // The spinner says how far it's got, at most ten times a second.
           if (Date.now() - shownAt < 100 && results.length < count) return;
@@ -275,7 +277,7 @@ export async function load(ctx, rest) {
 export async function copyCurl(ctx, which) {
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note('Pick a request first.', 'error');
-  if (!inRun(request)) return ctx.note("A WebSocket isn't something curl sends.", 'error');
+  if (!inRun(request) || request.method === 'GRPC') return ctx.note(`A ${request.method === 'GRPC' ? 'gRPC call' : 'WebSocket'} isn't something curl sends.`, 'error');
   const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (req) ctx.copy(toCurl(req, { dir: ctx.data.dir }), 'it as curl');
 }

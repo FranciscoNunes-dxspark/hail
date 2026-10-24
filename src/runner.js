@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, extname } from 'node:path';
 import { runChecks } from './checks.js';
 import { send } from './send.js';
+import { grpcSend } from './grpc.js';
 import { parseTimeout } from './transport.js';
 import { issueText } from './contract.js';
 
@@ -19,7 +20,7 @@ import { issueText } from './contract.js';
  */
 export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env, onStream } = {}) {
   const options = req.options ?? {};
-  const { raw, ...response } = await send(req, {
+  const { raw, ...response } = req.method === 'GRPC' ? await grpcCall(req, { signal, insecure, timeout: parseTimeout(options.timeout) }) : await send(req, {
     signal,
     fetch,
     jar: options['no-cookie-jar'] ? null : jar,
@@ -45,6 +46,12 @@ export async function exchange(req, { signal, globals = {}, fetch, jar = null, i
     after = r.globals;
   }
   return { response, checks, globals: after, saved };
+}
+
+/** A gRPC call (grpc.js), with its body's bytes as `raw`, as send gives them. */
+async function grpcCall(req, opts) {
+  const response = await grpcSend(req, opts);
+  return { ...response, raw: Buffer.from(response.body) };
 }
 
 /** Whether `request` is sent in a run of the whole file (/send all, hail test): a WebSocket is opened on its own. */
