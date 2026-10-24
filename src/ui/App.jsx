@@ -15,7 +15,7 @@ import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
-import { createTokens } from '../oauth.js';
+import { GRANT_NAMES, createTokens } from '../oauth.js';
 import { checkContract, loadContract } from '../contract.js';
 import { contextIn, pastedLine, readMoods, writeMood } from '../family.js';
 import { replaceBody } from '../takes.js';
@@ -236,7 +236,11 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const tokensRef = useRef(null);
   tokensRef.current ??= createTokens({
     credentials,
-    onSignIn: ({ id, how }) => how === 'signed in' && note(`Signed in with ${id}`, 'ok'),
+    onSignIn: ({ id, grant, how }) => {
+      if (how !== 'signed in') return;
+      note(`Signed in with ${id}`, 'ok');
+      a.activity(ctxRef.current, `Signed in with ${id} (OAuth 2, ${GRANT_NAMES[grant]}${environment() ? `, ${environment()}` : ''})`);
+    },
     onNote: (text) => note(text, 'error'),
   });
   const historyPos = useRef(-1);

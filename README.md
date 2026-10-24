@@ -492,6 +492,17 @@ lines in `.env` files) the line Trawl connects with: `/azure-sql <server> [datab
 signed in with Entra ID, else `/add <name> <server> [database]` with its port, `--kind`, `--user` and `--trust-cert` as the
 connection says, never its password (Trawl asks for that). `↵` copies the one under the cursor.
 
+`/timeline` shows the family's activity log: what each of the five apps did that the others would want
+to know (Splice's pushes, Trawl's writes, Bosun's restarts and crashes…), newest first, with the app and
+the project it was in. `p` shows this project's alone (the checkout the open file is in, and entries that
+name none), or everything again; `↵` shows an entry whole, `y` copies it. Hail adds a `/load` run's
+summary, a `/send all` that failed (and which requests), the mock starting and stopping, OAuth sign-ins
+(the auth's name and grant, never a token) and imports: names, counts and where, nothing secret.
+
+`/wiring` shows what the open file's project points at, read from its folder and the checkout it's in:
+the addresses, hosts, ports and connection strings in `appsettings*.json`, `.env` files and
+`http-client.env.json`, grouped by the file they're in, every password, key and token in them masked.
+
 Each app's mascot also says how it feels, in a small file the others read (`~/.family`). Hoot's mood
 (happy after a response, worried when one failed its checks or something went wrong, busy while
 sending) is written whenever it changes, and every 30 seconds Hoot looks at the others': when one of
@@ -581,6 +592,8 @@ and Trawl.
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/take <family:v1:…>` | Take what a sibling app copied (see [With the sibling apps](#with-the-sibling-apps)) |
 | `/family` | What this project offers the sibling apps: the command for Splice, Bosun or Trawl, copied with `↵` |
+| `/timeline` | What the family's apps did, newest first (`p` this project only, `↵` an entry whole, `y` copies it) |
+| `/wiring` | What this project points at: addresses, hosts, ports and connection strings in its settings, secrets masked |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
 | `/settings` | Accent colour, theme, mouse, updates, notifications, family moods, history |

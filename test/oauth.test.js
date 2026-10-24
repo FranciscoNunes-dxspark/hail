@@ -13,6 +13,7 @@ import { environmentsFrom } from '../src/environments.js';
 import { fill } from '../src/variables.js';
 import { authorizationCode, clientCredentials, createTokens, deviceAuthorization, passwordGrant, pkcePair, readAuthConfig, refreshName } from '../src/oauth.js';
 import { runTests } from '../src/headless.js';
+import { readActivity } from '../src/family.js';
 import { KEYS, start, tempHome, type, until } from './helpers.js';
 
 let cleanup;
@@ -274,6 +275,9 @@ test('through the UI: a client secret asked for, the token sent and kept out of 
     await until(() => frame().includes('Signed in with browser') && /"auth": "Bearer access-\d+-token"/.test(frame()), 'signed in in the browser and sent');
     assert.match(opened[0], /\/authorize\?response_type=code/);
     assert.ok([...credentials.saved.keys()].some((k) => /^oauth:[0-9a-f]{16}:dev:browser$/.test(k)), 'its refresh token kept');
+    const logged = readActivity().map((e) => e.text).join('\n');
+    assert.match(logged, /Signed in with browser \(OAuth 2, Authorization Code, dev\) \(api\.http\)/);
+    assert.doesNotMatch(logged, /access-|refresh-/, 'never a token');
 
     // Device Authorization: the code shown in the confirm area until it's approved.
     app.stdin.write(KEYS.down);

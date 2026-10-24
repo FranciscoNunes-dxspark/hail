@@ -25,7 +25,8 @@ import { parseTimeout } from './transport.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
 import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
 import { checkLines, contractLines, statusColour } from './ui/response.js';
-import { APP_NAMES, contextIn, copiedNote, describeContext, notMine, projectAt, repoRoot, shareLine, trawlLine } from './family.js';
+import { APP_NAMES, FAMILY, contextIn, copiedNote, describeContext, logActivity, notMine, projectAt, projectWiring, readActivity, repoRoot, shareLine, trawlLine } from './family.js';
+import { fit, relTime } from './text.js';
 import { findByRequestId, hostVariable, idsIn, replayBlock, startsWithVariable, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
@@ -215,6 +216,10 @@ export async function sendAll(ctx) {
   );
   if (!results.length) return;
   const cancelled = done.error?.cancelled;
+  if (!cancelled && runFailed(results)) {
+    const failedNames = results.filter((r) => r.error || r.skipped || r.checks?.error || (r.checks?.tests ?? []).some((t) => !t.passed)).map((r) => r.request.label);
+    activity(ctx, `Send all: ${summaryLine(results, { stopped })}; failed: ${failedNames.slice(0, 5).join(', ')}${failedNames.length > 5 ? '…' : ''}`, 'error');
+  }
   const left = requests.slice(results.length);
   const lines = reportLines(results, { left, stopped: stopped || cancelled });
   ctx.showText(`Sent all: ${ctx.data.name}${ctx.environment() ? ` · ${ctx.environment()}` : ''}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
@@ -268,6 +273,7 @@ export async function load(ctx, rest) {
   );
   if (!done.ok || !run?.results.length) return;
   const stats = loadStats(run);
+  activity(ctx, `Load ${request.label}: ${loadSummary(stats, { count, cancelled: run.cancelled })}`);
   const lines = loadReport(stats, { label: `${req.method} ${request.label}`, count, concurrency, cancelled: run.cancelled });
   ctx.showText(`Load: ${request.label}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
   return { stats };
@@ -477,21 +483,25 @@ export async function importFrom(ctx, rest) {
     envs[name] = { ...envs[name], ...vars };
     writeFileSync(envPath, `${JSON.stringify(envs, null, 2)}\n`);
     await ctx.reload();
+    activity(ctx, `Imported the environment ${name} from ${basename(path)} into http-client.env.json`);
     ctx.note(`Added the environment ${name} (${Object.keys(vars).length} variable${Object.keys(vars).length === 1 ? '' : 's'}) to http-client.env.json: e picks it${notes}`, 'ok');
     return { kind: r.kind };
   }
   if (!r.requests) return ctx.note(`There are no requests in ${basename(path)}.`, 'error');
   const what = `${r.requests} request${r.requests === 1 ? '' : 's'} from ${basename(path)} (${KIND_NAMES[r.kind]})`;
+  const logImport = (into) => activity(ctx, `Imported ${what} into ${into}`);
   if (fresh || !ctx.data) {
     const target = join(dir, `${basename(path).replace(/\.(json|ya?ml|har)$/i, '')}.http`);
     if (existsSync(target)) return ctx.note(`${basename(target)} is there already: /open it and /import ${arg} without --new adds to it.`, 'error');
     writeFileSync(target, r.text);
     await ctx.openFile(target);
+    logImport(basename(target));
     ctx.note(`Imported ${what} into ${basename(target)}${notes}`, 'ok');
   } else {
     const at = ctx.appendRequests(r.text);
     if (at < 0) return;
     ctx.goToRequest(at);
+    logImport(ctx.data.name);
     ctx.note(`Imported ${what} into ${ctx.data.name}: ctrl+z in Edit undoes it${notes}`, 'ok');
   }
   return { kind: r.kind, requests: r.requests };
@@ -947,6 +957,7 @@ export async function mock(ctx, rest) {
     if (!cur) return ctx.note('The mock isn\'t running.');
     await cur.close();
     ctx.setMockServer(null);
+    activity(ctx, `Stopped the mock on http://127.0.0.1:${cur.port}`);
     return ctx.note(`Stopped the mock on port ${cur.port}`);
   }
   if (!ctx.data) return ctx.note(NO_FILE, 'error');
@@ -969,10 +980,98 @@ export async function mock(ctx, rest) {
   }
   ctx.setMockServer(server);
   const routes = mockRoutes(ctx);
+  activity(ctx, `Started a mock of the API on http://127.0.0.1:${server.port} (${routes.length} route${routes.length === 1 ? '' : 's'})`);
   const fromContract = routes.filter((r) => r.source === 'contract').length;
   ctx.note(
     `Mock of ${ctx.data.name} on http://127.0.0.1:${server.port}: ${routes.length} route${routes.length === 1 ? '' : 's'}${fromContract ? ` (${fromContract} from the contract)` : ''}${routes.length ? '' : ', none yet: send the requests and their responses are served'}\n${routes.map((r) => `${r.method} ${r.template}  ${r.label}`).join('\n')}`,
     'ok',
   );
   return server;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The family's activity log and wiring (family.js).
+
+/** The project the open file belongs to, for the activity log: its checkout, else its folder. */
+const projectOf = (ctx) => (ctx.data ? (repoRoot(ctx.data.dir) ?? ctx.data.dir) : null);
+
+/**
+ * Adds what Hail did, or found, to the family's activity log for /timeline here and in the other apps:
+ * /load runs, /send all with failures, the mock starting and stopping, OAuth sign-ins and imports.
+ * Names, counts and where; never a token, body or secret (logActivity masks what looks like one too).
+ */
+export function activity(ctx, text, kind = 'info') {
+  if (!ctx.data) return;
+  logActivity('hail', { text: `${text} (${ctx.data.name})`, kind, project: projectOf(ctx) });
+}
+
+/**
+ * /timeline: what the family's apps did, newest first, from all five; p shows this project's alone (and
+ * what names none), or everything again; ↵ shows an entry whole, y copies it.
+ */
+export function timeline(ctx, { mine = false, replace = false } = {}) {
+  const project = projectOf(ctx);
+  const list = readActivity({ project: mine && project ? project : undefined, limit: 500 });
+  const appW = Math.max(...FAMILY.map((a) => APP_NAMES[a].length));
+  const where = (e) => (e.project ? basename(e.project) : '');
+  const here = project ? basename(project) : null;
+  ctx.showPicker(
+    {
+      title: `Timeline${mine && here ? ` of ${here}` : ': the family'} (${list.length})`,
+      hint: `↵ the whole entry · y copy it${here ? ` · p ${mine ? 'every project' : `${here} only`}` : ''}`,
+      empty: mine ? `Nothing logged for ${here} yet. p shows every project.` : 'Nothing logged yet: the apps add what they do (a push, a restart, a load run, a mock started) as they do it.',
+      items: list.map((e) => ({
+        entry: e,
+        segments: [
+          { text: fit(relTime(e.at), 4, 'right'), color: theme.dim },
+          { text: `  ${fit(APP_NAMES[e.app] ?? e.app, appW)}`, color: e.app === 'hail' ? theme.accent : theme.info, bold: true },
+          { text: `  ${e.text}`, color: e.kind === 'error' ? theme.del : undefined },
+          ...(!mine && where(e) ? [{ text: `  ${where(e)}`, color: theme.dim }] : []),
+        ],
+      })),
+      onPick: ({ entry: e }) =>
+        ctx.showText(
+          `${APP_NAMES[e.app] ?? e.app}, ${new Date(e.at).toLocaleString()}`,
+          [e.text, '', `App: ${APP_NAMES[e.app] ?? e.app}`, `When: ${new Date(e.at).toLocaleString()}`, `Kind: ${e.kind ?? 'info'}`, ...(e.project ? [`Project: ${e.project}`] : [])].join('\n'),
+        ),
+      keys: { y: ({ entry: e }) => ctx.copy(e.text, 'the entry') },
+      actions: project ? { p: () => timeline(ctx, { mine: !mine, replace: true }) } : {},
+    },
+    { replace },
+  );
+}
+
+/**
+ * /wiring: what the open file's project points at (family.js's projectWiring: addresses, hosts, ports,
+ * connection strings, secrets masked), from its folder and the checkout it's in, by file.
+ */
+export function wiring(ctx) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  const root = repoRoot(ctx.data.dir);
+  const dirs = [ctx.data.dir, ...(root && root !== ctx.data.dir ? [root] : [])];
+  const lines = [];
+  const text = [];
+  let total = 0;
+  for (const d of dirs) {
+    const found = projectWiring(d);
+    total += found.length;
+    const bySource = new Map();
+    for (const w of found) {
+      if (!bySource.has(w.source)) bySource.set(w.source, []);
+      bySource.get(w.source).push(w);
+    }
+    for (const [source, list] of bySource) {
+      const keyW = Math.min(40, Math.max(...list.map((w) => w.key.length)));
+      if (lines.length) lines.push([]);
+      const label = dirs.length > 1 && d !== ctx.data.dir ? `${source}  (the checkout, ${d})` : source;
+      lines.push([{ text: label, bold: true, color: theme.accent }]);
+      text.push(label);
+      for (const w of list) {
+        lines.push([{ text: `  ${fit(w.key, keyW)}  `, color: theme.dim }, { text: w.value }]);
+        text.push(`  ${w.key}  ${w.value}`);
+      }
+    }
+  }
+  if (!total) return ctx.note(`Nothing here points anywhere Hail can see: no addresses, hosts, ports or connection strings in appsettings*.json, .env files or http-client.env.json in ${dirs.join(' or ')}.`);
+  ctx.showText(`What ${basename(projectOf(ctx))} points at (${total})`, text.join('\n'), { lines });
 }

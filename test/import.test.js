@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { parseHttpFile } from '../src/http-file.js';
 import { detectImport, exampleFor, importHar, importOpenApi, importPostman, importPostmanEnvironment, importText } from '../src/importers.js';
 import { basicAuth } from '../src/send.js';
+import { readActivity } from '../src/family.js';
 import { KEYS, start, tempHome, type, until } from './helpers.js';
 
 let cleanup;
@@ -199,6 +200,7 @@ test('through the UI: appended to the open file (and undone), a new file with --
     app.stdin.write(KEYS.enter);
     await until(() => f().includes('Imported 2 requests from pets.yaml (an OpenAPI document) into pets.http'), 'a new file');
     assert.ok(existsSync(join(dir, 'pets.http')));
+    assert.match(readActivity().map((e) => e.text).join('\n'), /Imported 2 requests from pets\.yaml \(an OpenAPI document\) into pets\.http/);
     assert.match(f(), /pets\.http/);
 
     app.stdin.write('/');
