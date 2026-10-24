@@ -43,6 +43,7 @@ export function entryFor({ label, name, at, request, response, checks, saved }) 
       url: blank(response.url, secrets),
       ...(response.insecure ? { insecure: true } : {}),
       ...(response.proxy ? { proxy: response.proxy } : {}),
+      ...(response.stream ? { stream: response.stream } : {}),
     },
     checks: checks
       ? {

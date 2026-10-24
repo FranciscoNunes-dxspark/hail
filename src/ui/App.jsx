@@ -653,6 +653,12 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       }
       showResponses();
     },
+    // An event stream's response so far, on screen while it comes; setResponse keeps the whole of it.
+    setLiveResponse: (request, sentAs, partial) => {
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response: partial, at: Date.now() } };
+      showResponses();
+    },
+    view: () => viewRef.current,
     history: () => historyRef.current.entries,
     // The History view, its cursor on `entry`, and the entry shown.
     showHistoryEntry: (entry) => {

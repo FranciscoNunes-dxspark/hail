@@ -5,6 +5,7 @@ import { callSignal } from './run.js';
 import { graphqlBody, isGraphql, multipartBoundary, multipartParts, multipartPayload } from './bodies.js';
 import { transport } from './transport.js';
 import { fill } from './variables.js';
+import { eventReader, eventsText, isEventStream, parseEvents } from './sse.js';
 
 /**
  * The request with every placeholder filled in: { method, url, headers, body, payload, missing,
@@ -81,8 +82,12 @@ const has = (headers, name) => headers.some(([k]) => k.toLowerCase() === name);
  * sets Cookie itself. `follow: false` gives back the redirect itself. `signal` cancels it; `timeout`
  * (milliseconds) gives up waiting. `insecure` skips checking https certificates, and the proxy comes
  * from `env`'s HTTPS_PROXY and the like (transport.js); the response says so (`insecure`, `proxy`).
+ * A server-sent event stream (text/event-stream) is read as it comes: `onStream(partial)` is given the
+ * response so far after each piece ({ ...response, streaming: true, events }), and cancelling (or the
+ * timeout) while it streams ends it there, keeping what came, rather than failing: the response then
+ * has `stream: { events, stopped }`.
  */
-export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now(), jar = null, follow = true, timeout = null, insecure = false, env = process.env } = {}) {
+export async function send(req, { signal, fetch = globalThis.fetch, now = () => performance.now(), jar = null, follow = true, timeout = null, insecure = false, env = process.env, onStream = null } = {}) {
   let url;
   try {
     url = new URL(req.url).href;
@@ -97,6 +102,7 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
   let bytes;
   let redirects = 0;
   let way = { proxy: null, insecure: false };
+  let stream = null;
   // A signal of its own, tied to `signal` only while it's on its way: a run of many sharing one
   // (/load's) would otherwise pile thousands of fetch's listeners on it, and Node warns on the terminal.
   const own = callSignal(signal);
@@ -130,7 +136,27 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
       url = next.href;
       redirects++;
     }
-    bytes = Buffer.from(await res.arrayBuffer());
+    const got = [...res.headers.entries()];
+    if (isEventStream(got) && res.body) {
+      stream = { events: 0, stopped: false };
+      const chunks = [];
+      const decoder = new TextDecoder();
+      const reader = eventReader();
+      let text = '';
+      try {
+        for await (const chunk of res.body) {
+          chunks.push(Buffer.from(chunk));
+          const piece = decoder.decode(chunk, { stream: true });
+          text += piece;
+          stream.events += reader.push(piece).length;
+          onStream?.({ status: res.status, statusText: res.statusText, headers: got, body: text, ms: Math.round(now() - started), size: text.length, url, redirects, streaming: true, events: stream.events });
+        }
+      } catch (e) {
+        if (!signal?.aborted && !timer?.aborted) throw e;
+        stream.stopped = true;
+      }
+      bytes = Buffer.concat(chunks);
+    } else bytes = Buffer.from(await res.arrayBuffer());
   } catch (e) {
     if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     if (timer?.aborted) throw new Error(`${new URL(url).host} didn't answer within ${timeout >= 1000 ? `${timeout / 1000} s` : `${timeout} ms`} (# @timeout)`);
@@ -150,6 +176,7 @@ export async function send(req, { signal, fetch = globalThis.fetch, now = () => 
     redirects,
     ...(way.insecure ? { insecure: true } : {}),
     ...(way.proxy ? { proxy: way.proxy } : {}),
+    ...(stream ? { stream } : {}),
   };
 }
 
@@ -173,10 +200,11 @@ export function networkError(e, url, way = {}) {
   return `Couldn't reach ${url}: ${c.message ?? e.message}`;
 }
 
-/** The response's body for reading: JSON indented, anything else as it came. */
+/** The response's body for reading: JSON indented, an event stream event by event, anything else as it came. */
 export function prettyBody(response) {
   const type = response.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '';
   const text = response.body;
+  if (isEventStream(response.headers)) return eventsText(parseEvents(text)) || text;
   if (/json/i.test(type) || /^\s*[[{]/.test(text)) {
     try {
       return JSON.stringify(JSON.parse(text), null, 2);

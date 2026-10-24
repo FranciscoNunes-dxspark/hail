@@ -14,9 +14,10 @@ import { issueText } from './contract.js';
  * variables afterwards (from `globals`), `saved` { path, shown } or { error } when `>>` said to save it.
  * `jar` keeps cookies (cookies.js) unless the request says `# @no-cookie-jar`; `# @no-redirect` and
  * `# @timeout 30` are the request's too, and `insecure` (the environment's SSLConfiguration) skips
- * checking certificates. Throws what send throws (no answer, cancelled, out of time).
+ * checking certificates; `onStream` is told of an event stream as it comes (send's). Throws what send
+ * throws (no answer, cancelled, out of time).
  */
-export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env } = {}) {
+export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env, onStream } = {}) {
   const options = req.options ?? {};
   const { raw, ...response } = await send(req, {
     signal,
@@ -26,6 +27,7 @@ export async function exchange(req, { signal, globals = {}, fetch, jar = null, i
     timeout: parseTimeout(options.timeout),
     insecure,
     env,
+    onStream,
   });
   let saved = null;
   if (req.output) {

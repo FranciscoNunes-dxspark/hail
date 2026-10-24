@@ -69,6 +69,8 @@ export function responseLines(sent, width, { headers = false, contract = null, r
       { text: `  ${r.ms} ms · ${formatSize(r.size)} · ${relTime(sent.at)}`, color: theme.dim },
     ],
   ];
+  if (r.streaming) out[0].push({ text: ` · ${r.events} event${r.events === 1 ? '' : 's'} · streaming… (esc stops it)`, color: theme.warn });
+  else if (r.stream) out[0].push({ text: ` · ${r.stream.events} event${r.stream.events === 1 ? '' : 's'}${r.stream.stopped ? ' · stopped' : ''}`, color: theme.dim });
   if (r.url !== sent.request.url) out.push([{ text: `→ ${r.url}`, color: theme.dim }]);
   const location = r.status >= 300 && r.status < 400 ? r.headers.find(([k]) => k.toLowerCase() === 'location')?.[1] : null;
   if (location) out.push([{ text: `Redirects to ${location} (not followed: # @no-redirect)`, color: theme.dim }]);

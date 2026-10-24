@@ -82,8 +82,18 @@ async function prepared(ctx, request) {
 }
 
 /** Sends a filled-in request with what the session holds for it, and keeps what came back. */
-async function exchangeFor(ctx, request, req, signal) {
-  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure });
+async function exchangeFor(ctx, request, req, signal, { live = false } = {}) {
+  // An event stream shows as it comes (in the Response view, from Requests), the spinner counting events.
+  let first = true;
+  const onStream = live
+    ? (partial) => {
+        if (first && ctx.view() === 'requests') ctx.setView('response');
+        first = false;
+        ctx.setLiveResponse(request, req, partial);
+        ctx.setBusyLabel(`Streaming: ${partial.events} event${partial.events === 1 ? '' : 's'}`);
+      }
+    : undefined;
+  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure, onStream });
   ctx.setGlobals(out.globals);
   ctx.setResponse(request, req, out.response, { checks: out.checks, saved: out.saved });
   return { ...out, contract: ctx.contractFor({ request: req, response: out.response }) ?? undefined };
@@ -95,7 +105,8 @@ function responseSummary({ response: res, checks, saved, contract }) {
   const drift = contract?.issues.length ? [`⚠ ${driftSummary(contract)}`] : [];
   const failed = (checks?.tests ?? []).filter((t) => !t.passed).map((t) => `✗ ${t.name}`);
   const save = saved?.error ?? (saved ? `Saved to ${saved.shown}` : null);
-  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : []), ...drift].join('\n');
+  const events = res.stream ? ` · ${res.stream.events} event${res.stream.events === 1 ? '' : 's'}${res.stream.stopped ? ', stopped' : ''}` : '';
+  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${events}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : []), ...drift].join('\n');
 }
 
 /** ↵ in Requests, and /send: sends it, and shows what came back. `/send all` sends every one. */
@@ -112,7 +123,7 @@ export async function send(ctx, which) {
   return ctx.task(
     `${req.method} ${shown}`,
     async (signal) => {
-      const out = await exchangeFor(ctx, request, req, signal);
+      const out = await exchangeFor(ctx, request, req, signal, { live: true });
       const failed = checkSummary(out.checks).failed;
       const drift = out.contract?.issues.length ?? 0;
       const worried = failed ? `${failed} check${failed === 1 ? '' : 's'} failed` : drift ? `${drift} difference${drift === 1 ? '' : 's'} from the contract` : undefined;

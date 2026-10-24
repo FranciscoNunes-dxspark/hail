@@ -72,6 +72,7 @@ export const HELP = [
       ['↵', 'Send the request again'],
       ['/', 'Search the response: matches show as you type, ↵ keeps it (a capital letter makes it match case)'],
       ['n N', 'Next, previous match · esc clears the search'],
+      ['event streams', 'A text/event-stream response streams in live, event by event (JSON indented), newest on screen\nesc stops it, keeping what came · # @timeout bounds an endless one in a run'],
     ],
   },
   {

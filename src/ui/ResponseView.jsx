@@ -24,8 +24,15 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
   };
   const lines = sent ? responseLines(sent, width - 4, { headers, contract: ctx.contractFor(sent) }) : [];
   const max = Math.max(0, lines.length - innerH);
+  // An event stream on its way keeps its newest events on screen, until it's scrolled up from them.
+  const streaming = Boolean(sent?.response.streaming);
+  const follow = useRef(true);
+  useEffect(() => {
+    follow.current = true;
+  }, [request?.label]);
   const setTop = (n) => {
     topRef.current = Math.max(0, Math.min(max, n));
+    follow.current = topRef.current >= max;
     setTopState(topRef.current);
   };
   // The lines `query` is in. The body's are kept while the query and the body's lines stay the same
@@ -109,7 +116,8 @@ export function ResponseView({ request, sent, ctx, width, height, active }) {
     if (e.wheel) setTop(topRef.current + e.wheel * 3);
   });
 
-  const shown = Math.min(top, max);
+  const shown = streaming && follow.current ? max : Math.min(top, max);
+  if (streaming && follow.current) topRef.current = max;
   const here = hits[Math.min(search.at, hits.length - 1)];
   // Only the lines on screen are drawn, so only they are marked.
   const visible = lines.slice(shown, shown + innerH);

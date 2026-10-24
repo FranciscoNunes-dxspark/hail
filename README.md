@@ -111,6 +111,13 @@ connection and the view. The conversation is then kept as the request's response
 history too, with the secrets it carried left out. `Sec-WebSocket-Protocol` asks for subprotocols. A run
 of the whole file (`A`, `hail test`) leaves WebSockets out.
 
+A response that's a stream of server-sent events (`Content-Type: text/event-stream`) shows as it comes:
+the Response view opens on it and keeps its newest events on screen (scrolling up stops that, `G` goes
+back), each event under a line with its number, `event:` and `id:`, its data JSON indented, and the
+spinner counts them. It goes on until the server ends it or `esc` stops it, which keeps what came; then
+it's kept like any response. In a run of the whole file (or `hail test`) an endless stream needs a
+`# @timeout`, which ends it there rather than failing it.
+
 Hail reads the file again whenever it's saved, so it can sit beside your editor, or you can edit it
 in Hail itself.
 
