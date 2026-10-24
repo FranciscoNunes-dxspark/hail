@@ -29,6 +29,7 @@ npm start -- api.http
 hail api.http     # that file
 hail              # the first .http (or .rest) file in this folder or the two below it
 hail test api.http [--env dev] [--contract-strict]   # send them all without the screen and report (for CI)
+hail mock api.http [--port 4010] [--env dev]         # serve the responses kept for them, until ctrl+c
 ```
 
 With none, `/new` writes an example to start from.
@@ -346,6 +347,29 @@ sparkline of the latency over the run, how many came back with each status, and 
 out of time) counted by kind. None of it is kept in the history, which stays the responses you sent
 yourself; the summary line stays in the Log. Up to 5,000 requests, 100 at a time.
 
+### A mock of the API
+
+`/mock` serves the open file's API on `http://127.0.0.1:4010` (`/mock 5000` on another port), for a
+frontend or a test to point at while the real one is away: each request's latest response kept in the
+history (its status, headers and body) is answered to the same method and path, a `{{variable}}` in the
+path matching any segment (`GET {{host}}/users/{{id}}` answers `/users/7`), and the path that `{{host}}`
+itself has in the environment counted (`http://localhost:3000/api` makes it `/api/users/7`). A request
+the file has no response for gets the example of the [contract](#contract-drift)'s operation, when there's
+one; anything else a 404 whose JSON lists what is served. It follows the history: send a request again
+and the mock answers with the new response. Credential headers and cookies aren't handed on, and it
+answers browsers' CORS questions. The header shows `mock :4010` while it runs, each request it gets is a
+line in the Log, and `/mock` again (or `/mock off`) stops it; it stops when Hail closes.
+
+From the shell, without the screen, until `ctrl+c`:
+
+```bash
+hail mock api.http --port 4010 --env dev
+```
+
+prints what it serves and a line per request it gets, reading the history again as Hail adds to it.
+Bosun can run it as one of a project's processes, beside the frontend that uses it (in `bosun.json`, or
+a `Procfile` line: `mock: hail mock api.http --port 4010`).
+
 ### Contract drift
 
 `/contract openapi.yaml` (or a `.json` file, or a URL) checks every response to the open file's
@@ -524,6 +548,7 @@ and Trawl.
 | `/import <file> [--new]` | Add the requests in a Postman collection, a HAR recording or an OpenAPI or Swagger document (or a Postman environment, to `http-client.env.json`); `--new` writes them to a file of their own |
 | `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |
 | `/open <file.http>` | Open another file |
+| `/mock [port\|off]` | Serve the responses kept for this file's requests (and the contract's examples) on `http://127.0.0.1:4010`, or stop it |
 | `/contract [file\|url\|off]` | Check every response against an OpenAPI or Swagger document, remembered for the file (`off` forgets it) |
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
 | `/auth [id\|clear]` | The environment's OAuth sign-ins and how each stands (`↵` signs in again, `x` forgets it); an id signs in with it; `clear` forgets them all |

@@ -8,6 +8,7 @@ import { configFile } from './config.js';
 import { driftSummary, loadContract } from './contract.js';
 import { curlToHttp, parseCurl } from './curl.js';
 import { KIND_NAMES, importText } from './importers.js';
+import { DEFAULT_PORT, routesFor, startMock } from './mock.js';
 import { changedOnly, lineDiff } from './diff.js';
 import { pathArg, writeExample } from './files.js';
 import { previousOf } from './history.js';
@@ -923,4 +924,53 @@ export async function auth(ctx, rest) {
       },
     },
   });
+}
+
+// ---------------------------------------------------------------------------------------------------
+// /mock (mock.js): the file's kept responses served on this machine.
+
+/** What the mock serves now: the open file's requests with responses kept, then the contract's examples. */
+const mockRoutes = (ctx) =>
+  ctx.data ? routesFor({ requests: ctx.data.requests, entries: ctx.history(), vars: { ...ctx.data.variables, ...ctx.data.environments.vars(ctx.environment()) }, spec: ctx.contract().spec }) : [];
+
+/**
+ * /mock [port|off]: starts the mock (on 4010 unless a port is given), or stops it when it's running.
+ * It serves each request's latest kept response at its method and path, following the history as it
+ * grows, and the contract's examples where the file has none; each request it gets is a line in the Log.
+ */
+export async function mock(ctx, rest) {
+  const arg = rest.trim();
+  const cur = ctx.mockServer();
+  if (arg === 'off' || (!arg && cur)) {
+    if (!cur) return ctx.note('The mock isn\'t running.');
+    await cur.close();
+    ctx.setMockServer(null);
+    return ctx.note(`Stopped the mock on port ${cur.port}`);
+  }
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  if (arg && (!/^\d+$/.test(arg) || Number(arg) > 65535)) return ctx.note('/mock takes a port number (4010 unless given), or off.', 'error');
+  const port = arg ? Number(arg) : DEFAULT_PORT;
+  if (cur) {
+    if (cur.port === port) return ctx.note(`The mock is running on http://127.0.0.1:${port}; /mock stops it.`);
+    await cur.close();
+    ctx.setMockServer(null);
+  }
+  let server;
+  try {
+    server = await startMock({
+      port,
+      routes: () => mockRoutes(ctx),
+      onHit: (h) => ctx.note(`mock ${h.method} ${h.path} → ${h.status}${h.label ? `  ${h.label}` : '  (nothing kept for it)'}`),
+    });
+  } catch (e) {
+    return ctx.note(`Couldn't start the mock: ${e.message}`, 'error');
+  }
+  ctx.setMockServer(server);
+  const routes = mockRoutes(ctx);
+  const fromContract = routes.filter((r) => r.source === 'contract').length;
+  ctx.note(
+    `Mock of ${ctx.data.name} on http://127.0.0.1:${server.port}: ${routes.length} route${routes.length === 1 ? '' : 's'}${fromContract ? ` (${fromContract} from the contract)` : ''}${routes.length ? '' : ', none yet: send the requests and their responses are served'}\n${routes.map((r) => `${r.method} ${r.template}  ${r.label}`).join('\n')}`,
+    'ok',
+  );
+  return server;
 }

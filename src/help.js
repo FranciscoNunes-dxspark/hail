@@ -136,6 +136,14 @@ export const HELP = [
     ],
   },
   {
+    title: 'Mock',
+    about: "the file's kept responses served on this machine, for a frontend or a test to point at",
+    rows: [
+      ['/mock [port]', "Serve each request's latest kept response at its method and path on http://127.0.0.1:4010 (or the port)\n{{variables}} in a path match any segment · the contract's examples where nothing is kept · a 404 lists what's served\nthe header shows mock :4010 · each request it gets is a line in the Log · /mock again (or off) stops it"],
+      ['hail mock api.http', 'The same from the shell until ctrl+c (--port, --env), for Bosun to run as a process'],
+    ],
+  },
+  {
     title: 'Contract',
     about: 'responses checked against an OpenAPI 3 or Swagger 2 document (JSON or YAML)',
     rows: [

@@ -75,7 +75,7 @@ const copiedText = (text) => {
   return n > 1 ? `${n} lines` : `${text.length} character${text.length === 1 ? '' : 's'}`;
 };
 
-function Header({ data, env, width, loading, mood }) {
+function Header({ data, env, width, loading, mood, mock }) {
   const segs = [
     { text: `${FACES[mood]} `, color: theme.accent, bold: true },
     { text: 'Hail', bold: true },
@@ -83,6 +83,7 @@ function Header({ data, env, width, loading, mood }) {
   if (data) {
     segs.push({ text: '  │  ', color: theme.border }, { text: data.name, bold: true });
     segs.push({ text: '  env ', color: theme.dim }, { text: env ?? (data.environments.names.length ? 'none' : '—'), color: env ? theme.warn : theme.dim, bold: Boolean(env) });
+    if (mock) segs.push({ text: '  mock ', color: theme.dim }, { text: `:${mock.port}`, color: theme.accent, bold: true });
   } else if (loading) segs.push({ text: '  loading…', color: theme.dim });
   const path = data?.dir ?? '';
   return <Row pointer={false} width={width} segments={[...fitSegments(segs, Math.max(20, width - stringWidth(path) - 1)), { text: ' ' }, { text: path, color: theme.dim }]} />;
@@ -173,6 +174,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const [busy, setBusy] = useState(null);
   const [welcome, setWelcome] = useState(true);
   const [update, setUpdate] = useState(null);
+  // /mock's server (mock.js), while it runs: shown in the header, stopped when Hail closes.
+  const [mockServer, setMockServerState] = useState(null);
+  const mockRef = useRef(null);
+  useEffect(() => () => void mockRef.current?.close(), []);
   // The pet looks happy (or worried) for a few seconds after a result; re-render when that wears off.
   const [, setMoodTick] = useState(0);
   useEffect(() => {
@@ -659,6 +664,11 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       showResponses();
     },
     view: () => viewRef.current,
+    mockServer: () => mockRef.current,
+    setMockServer: (m) => {
+      mockRef.current = m;
+      setMockServerState(m);
+    },
     history: () => historyRef.current.entries,
     // The History view, its cursor on `entry`, and the entry shown.
     showHistoryEntry: (entry) => {
@@ -1227,7 +1237,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
 
   return (
     <Box flexDirection="column" width={W} height={H}>
-      <Header data={data} env={environment()} width={W} loading={loading} mood={mood} />
+      <Header data={data} env={environment()} width={W} loading={loading} mood={mood} mock={mockServer} />
       <Tabs view={view} entries={entries} width={W} />
       <Box height={mainH} width={W}>
         {main}
