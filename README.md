@@ -2,6 +2,8 @@
 
 # Hail
 
+> **Hail has moved to [fleet](https://github.com/FranciscoNunes-dxspark/fleet/tree/main/apps/hail)**, the family's one repository. Its releases are there now, tagged `hail-v<version>`; an installed Hail updates itself from them. This repository is kept for its history.
+
 An HTTP client for the terminal, over `.http` files: the format VS Code's REST Client and JetBrains'
 HTTP Client already read, so the requests live in the repository next to the code and work in all
 three. Open a file, pick a request, press `↵`.
