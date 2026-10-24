@@ -11,6 +11,7 @@ import { checkForUpdate, installUpdate, removeOldExecutables } from './update.js
 import { copyToClipboard } from './clipboard.js';
 import { terminalMouse } from './mouse.js';
 import { notification } from './notify.js';
+import { openInBrowser } from './browser.js';
 
 const args = process.argv.slice(2);
 
@@ -26,6 +27,23 @@ if (args[0] === 'test') {
   process.exit(code);
 }
 
+// hail mock api.http [--port 4010] [--env dev]: the kept responses served until ctrl+c (Bosun can run it).
+if (args[0] === 'mock') {
+  const { runMock } = await import('./headless.js');
+  const mock = await runMock(args.slice(1));
+  if (mock.code != null) {
+    await new Promise((r) => process.stdout.write('', r));
+    process.exit(mock.code);
+  }
+  const stop = async () => {
+    await mock.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  await new Promise(() => {});
+}
+
 if (args.includes('-v') || args.includes('--version')) {
   console.log(`hail ${VERSION}`);
   process.exit(0);
@@ -34,6 +52,7 @@ if (args.includes('-v') || args.includes('--version')) {
 if (args.includes('-h') || args.includes('--help')) {
   console.log(`hail [file.http]
 hail test [file.http] [--env <name>] [--contract <openapi>] [--contract-strict]
+hail mock [file.http] [--port 4010] [--env <name>]
 
 An HTTP client for the terminal, over .http files. Opens [file.http], or the
 first .http file in the current folder (or the folders under it).
@@ -41,6 +60,9 @@ first .http file in the current folder (or the folders under it).
 hail test sends every request in the file without the UI, prints a report of
 their response handlers' tests and how they compare with the contract, and
 exits with 1 if anything failed (drift only with --contract-strict).
+
+hail mock serves the responses Hail kept for the file's requests (and the
+contract's examples) on http://127.0.0.1:4010, until ctrl+c.
 
 Inside: ↵ sends the request under the cursor, e picks the environment,
 ? shows every key, / the commands.`);
@@ -76,7 +98,7 @@ const copy = (text) => copyToClipboard(text);
 const given = args.find((x) => !x.startsWith('-'));
 const file = given ? resolve(given) : findHttpFiles(process.cwd()).map((f) => resolve(f))[0];
 const app = render(
-  <App config={config} initialFile={file} askClaude={ask} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} notify={(title, body) => process.stdout.write(notification(title, body))} />,
+  <App config={config} initialFile={file} askClaude={ask} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} openUrl={openInBrowser} notify={(title, body) => process.stdout.write(notification(title, body))} />,
   // Through the mouse's stdout, which watches the frames to select text from.
   { exitOnCtrlC: false, stdout: mouse?.stdout ?? process.stdout },
 );

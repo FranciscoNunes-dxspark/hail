@@ -36,6 +36,7 @@ export const HELP = [
       ['A', 'Send them all, top to bottom (/send all), and show a report: each one\'s status, time and tests'],
       ['c', 'Copy it as a curl command, variables filled in'],
       ['I', 'Import a curl command (/import-curl): paste it, ↵ adds it to the file as a request'],
+      ['/import <file>', 'Add the requests in a Postman collection, a HAR recording or an OpenAPI/Swagger document (ctrl+z in Edit undoes it)\na Postman environment goes into http-client.env.json · --new writes them to a file of their own\ncredentials become {{$secret}} placeholders, said; cookies and auth headers in a HAR are left out'],
       ['L', 'Load in a pinch: starts /load <it> 200 10 (count, then how many at once) for you to change and ↵\nlatency percentiles, requests a second, statuses, errors and a sparkline over time · esc stops it'],
       ['y', 'Copy its URL'],
       ['i', 'Edit the file, typing, on this request'],
@@ -72,6 +73,7 @@ export const HELP = [
       ['↵', 'Send the request again'],
       ['/', 'Search the response: matches show as you type, ↵ keeps it (a capital letter makes it match case)'],
       ['n N', 'Next, previous match · esc clears the search'],
+      ['event streams', 'A text/event-stream response streams in live, event by event (JSON indented), newest on screen\nesc stops it, keeping what came · # @timeout bounds an endless one in a run'],
     ],
   },
   {
@@ -96,6 +98,7 @@ export const HELP = [
       ['{{$uuid}} {{$timestamp}}', 'Built-ins; also $isoTimestamp, $randomInt min max, $processEnv NAME, $env.NAME'],
       ['{{$azToken resource}}', "A token from the Azure CLI's sign-in (az login)"],
       ['{{$secret name}}', "A secret kept in the system's credential store, asked for the first time it's used (/secret saves or replaces one)"],
+      ['{{$auth.token("id")}}', 'An OAuth 2 token from the environment\'s "Security": { "Auth": { "id": { "Type": "OAuth2", "Grant Type": … } } }\nClient Credentials, Password, Authorization Code (the browser, PKCE) or Device Authorization (a code to enter)\nkept until it runs out, then refreshed (refresh tokens in the credential store) · $auth.idToken gives the ID token\n/auth shows each sign-in (↵ again, x forget) · /auth <id> signs in · /auth clear forgets them'],
     ],
   },
   {
@@ -103,6 +106,8 @@ export const HELP = [
     rows: [
       ['< ./body.json', 'The body from a file, as it is (<@ fills in its variables)'],
       ['multipart', 'Content-Type: multipart/form-data; boundary=X, then --X lines between parts, each with its headers, a blank line and its value\na part\'s value can be < ./photo.png, sent byte for byte · --X-- ends it'],
+      ['WEBSOCKET ws://…', "A WebSocket: messages after the headers, each under a === line; === wait-for-server waits for the server's next message first\n↵ opens it live: → sent, ← received (JSON indented) · type a message, ↵ sends it · ↑↓ scroll back · esc closes it\nthe conversation is kept as its response · a run of the whole file leaves WebSockets out"],
+      ['GRPC host:port/pkg.Svc/Method', 'A unary gRPC call: headers are its metadata, the body the request as JSON; the types come from the server\'s reflection\nthe answer as JSON, gRPC\'s status as the nearest HTTP one (NOT_FOUND 404…) · grpcs:// or https:// for TLS'],
       ['GRAPHQL url', 'A GraphQL query as the body, then its variables as a JSON object after a blank line; sent as a POST of { query, variables }\n(X-REQUEST-TYPE: GraphQL on a POST does the same)'],
     ],
   },
@@ -132,6 +137,14 @@ export const HELP = [
     ],
   },
   {
+    title: 'Mock',
+    about: "the file's kept responses served on this machine, for a frontend or a test to point at",
+    rows: [
+      ['/mock [port]', "Serve each request's latest kept response at its method and path on http://127.0.0.1:4010 (or the port)\n{{variables}} in a path match any segment · the contract's examples where nothing is kept · a 404 lists what's served\nthe header shows mock :4010 · each request it gets is a line in the Log · /mock again (or off) stops it"],
+      ['hail mock api.http', 'The same from the shell until ctrl+c (--port, --env), for Bosun to run as a process'],
+    ],
+  },
+  {
     title: 'Contract',
     about: 'responses checked against an OpenAPI 3 or Swagger 2 document (JSON or YAML)',
     rows: [
@@ -148,6 +161,8 @@ export const HELP = [
       ['/take family:v1:…', 'What a sibling copied (/take is optional): a request from Sonar is added as ### replay <METHOD> <path>,\nto the environment\'s {{host}} or to where it came from, and picked to send\nrows from Trawl become a JSON body: a new POST to {{host}}/<table>, or the body of the request under the cursor (ctrl+z in Edit undoes it)\na log line from Bosun: the response in History whose headers carry its request id (X-Request-Id, traceparent…)'],
       ['paste', 'A line starting with / (or a family:v1: context) pasted while a view has the keys opens the prompt with it, for ↵'],
       ['/family', 'What this project offers the others, ↵ copies it: Splice /open <checkout> · Bosun /move <folder>\nTrawl /azure-sql or /add for each database in appsettings*.json and .env (never a password)'],
+      ['/timeline', "The family's activity log, newest first: p this project only (or all again) · ↵ an entry whole · y copy it\nHail adds /load runs, /send all that failed, the mock starting and stopping, OAuth sign-ins and imports (never a secret)"],
+      ['/wiring', 'What this project points at (appsettings*.json, .env, http-client.env.json in its folder and checkout), secrets masked'],
       ['moods', 'Hoot shares his mood and, every 30 s, remarks once on a sibling that is worried, sad or happy (esc puts it away)\nthe Family moods setting turns it off'],
     ],
   },

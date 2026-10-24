@@ -9,10 +9,11 @@ const PLACEHOLDER = /\{\{\s*(.+?)\s*\}\}/g;
 /**
  * The built-ins, by name; each takes its arguments (what follows the name, split on spaces). `now`,
  * `random` and `processEnv` stand in for the real ones in tests; `azToken(resource)` returns a token,
- * `secret(name)` a saved secret (or null). Every secret filled in is added to `used`, so what's kept
- * of a request afterwards can leave it out.
+ * `secret(name)` a saved secret (or null), `auth(kind, id)` an OAuth token ({{$auth.token("id")}},
+ * kind 'token' or 'idToken'; oauth.js). Every secret and token filled in is added to `used`, so what's
+ * kept of a request afterwards can leave it out.
  */
-export function builtins({ now = () => Date.now(), random = Math.random, processEnv = process.env, uuid = randomUUID, azToken, secret, used } = {}) {
+export function builtins({ now = () => Date.now(), random = Math.random, processEnv = process.env, uuid = randomUUID, azToken, secret, auth, used } = {}) {
   const env = (name) => processEnv[name];
   return {
     $timestamp: () => String(Math.floor(now() / 1000)),
@@ -26,6 +27,11 @@ export function builtins({ now = () => Date.now(), random = Math.random, process
       const token = await azToken?.(resource);
       if (token) used?.add(token);
       return token;
+    },
+    $auth: async ([kind, id]) => {
+      const token = auth && id ? await auth(kind, id) : null;
+      if (token) used?.add(token);
+      return token ?? undefined;
     },
     $secret: async ([name]) => {
       const value = name ? await secret?.(name) : null;
@@ -81,7 +87,9 @@ export async function fill(text, { globals = {}, environment = {}, file = {}, re
     last = m.index + m[0].length;
     const expr = m[1];
     let value;
-    if (expr.startsWith('$')) {
+    const oauth = /^\$auth\.(token|idToken)\(\s*["']([^"']+)["']\s*\)$/.exec(expr);
+    if (oauth) value = await fns.$auth([oauth[1], oauth[2]]);
+    else if (expr.startsWith('$')) {
       const [name, ...args] = expr.split(/\s+/);
       const dotted = /^\$env\.(.+)$/.exec(name);
       value = dotted ? env.processEnv?.[dotted[1]] ?? process.env[dotted[1]] : await fns[name]?.(args);

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, extname } from 'node:path';
 import { runChecks } from './checks.js';
 import { send } from './send.js';
+import { grpcSend } from './grpc.js';
 import { parseTimeout } from './transport.js';
 import { issueText } from './contract.js';
 
@@ -14,11 +15,12 @@ import { issueText } from './contract.js';
  * variables afterwards (from `globals`), `saved` { path, shown } or { error } when `>>` said to save it.
  * `jar` keeps cookies (cookies.js) unless the request says `# @no-cookie-jar`; `# @no-redirect` and
  * `# @timeout 30` are the request's too, and `insecure` (the environment's SSLConfiguration) skips
- * checking certificates. Throws what send throws (no answer, cancelled, out of time).
+ * checking certificates; `onStream` is told of an event stream as it comes (send's). Throws what send
+ * throws (no answer, cancelled, out of time).
  */
-export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env } = {}) {
+export async function exchange(req, { signal, globals = {}, fetch, jar = null, insecure = false, env, onStream } = {}) {
   const options = req.options ?? {};
-  const { raw, ...response } = await send(req, {
+  const { raw, ...response } = req.method === 'GRPC' ? await grpcCall(req, { signal, insecure, timeout: parseTimeout(options.timeout) }) : await send(req, {
     signal,
     fetch,
     jar: options['no-cookie-jar'] ? null : jar,
@@ -26,6 +28,7 @@ export async function exchange(req, { signal, globals = {}, fetch, jar = null, i
     timeout: parseTimeout(options.timeout),
     insecure,
     env,
+    onStream,
   });
   let saved = null;
   if (req.output) {
@@ -44,6 +47,15 @@ export async function exchange(req, { signal, globals = {}, fetch, jar = null, i
   }
   return { response, checks, globals: after, saved };
 }
+
+/** A gRPC call (grpc.js), with its body's bytes as `raw`, as send gives them. */
+async function grpcCall(req, opts) {
+  const response = await grpcSend(req, opts);
+  return { ...response, raw: Buffer.from(response.body) };
+}
+
+/** Whether `request` is sent in a run of the whole file (/send all, hail test): a WebSocket is opened on its own. */
+export const inRun = (request) => request.method !== 'WEBSOCKET';
 
 /** `path` with -1, -2… before its extension: out.json, out-1.json. */
 export function numbered(path, n) {

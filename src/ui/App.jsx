@@ -15,6 +15,7 @@ import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
+import { GRANT_NAMES, createTokens } from '../oauth.js';
 import { checkContract, loadContract } from '../contract.js';
 import { contextIn, pastedLine, readMoods, writeMood } from '../family.js';
 import { replaceBody } from '../takes.js';
@@ -36,6 +37,7 @@ import { RequestsView } from './RequestsView.jsx';
 import { ResponseView } from './ResponseView.jsx';
 import { EditView } from './EditView.jsx';
 import { TextViewer } from './TextViewer.jsx';
+import { SocketView } from './SocketView.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
 import { FACES, familyMood, moodFor, reactionLine } from '../pet.js';
 
@@ -73,7 +75,7 @@ const copiedText = (text) => {
   return n > 1 ? `${n} lines` : `${text.length} character${text.length === 1 ? '' : 's'}`;
 };
 
-function Header({ data, env, width, loading, mood }) {
+function Header({ data, env, width, loading, mood, mock }) {
   const segs = [
     { text: `${FACES[mood]} `, color: theme.accent, bold: true },
     { text: 'Hail', bold: true },
@@ -81,6 +83,7 @@ function Header({ data, env, width, loading, mood }) {
   if (data) {
     segs.push({ text: '  │  ', color: theme.border }, { text: data.name, bold: true });
     segs.push({ text: '  env ', color: theme.dim }, { text: env ?? (data.environments.names.length ? 'none' : '—'), color: env ? theme.warn : theme.dim, bold: Boolean(env) });
+    if (mock) segs.push({ text: '  mock ', color: theme.dim }, { text: `:${mock.port}`, color: theme.accent, bold: true });
   } else if (loading) segs.push({ text: '  loading…', color: theme.dim });
   const path = data?.dir ?? '';
   return <Row pointer={false} width={width} segments={[...fitSegments(segs, Math.max(20, width - stringWidth(path) - 1)), { text: ' ' }, { text: path, color: theme.dim }]} />;
@@ -134,8 +137,9 @@ const DOUBLE_CLICK_MS = 400;
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
 // `notify(title, body)` says a long run has finished (cli.jsx rings the terminal's bell and raises a
 // desktop notification); tests pass a recorder or nothing. `familyEvery` is how often (ms) the sibling
-// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do).
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, familyEvery = 30_000 }) {
+// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do). `openUrl` opens a page in
+// the browser (an OAuth sign-in; cli.jsx's browser.js), which tests stub.
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, openUrl, familyEvery = 30_000 }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -170,6 +174,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const [busy, setBusy] = useState(null);
   const [welcome, setWelcome] = useState(true);
   const [update, setUpdate] = useState(null);
+  // /mock's server (mock.js), while it runs: shown in the header, stopped when Hail closes.
+  const [mockServer, setMockServerState] = useState(null);
+  const mockRef = useRef(null);
+  useEffect(() => () => void mockRef.current?.close(), []);
   // The pet looks happy (or worried) for a few seconds after a result; re-render when that wears off.
   const [, setMoodTick] = useState(0);
   useEffect(() => {
@@ -224,6 +232,17 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const promptRef = useRef(prompt);
   const confirmRef = useRef(null);
   const nextId = useRef(1);
+  // OAuth tokens (oauth.js), in memory per file, environment and auth id; refresh tokens go to `credentials`.
+  const tokensRef = useRef(null);
+  tokensRef.current ??= createTokens({
+    credentials,
+    onSignIn: ({ id, grant, how }) => {
+      if (how !== 'signed in') return;
+      note(`Signed in with ${id}`, 'ok');
+      a.activity(ctxRef.current, `Signed in with ${id} (OAuth 2, ${GRANT_NAMES[grant]}${environment() ? `, ${environment()}` : ''})`);
+    },
+    onNote: (text) => note(text, 'error'),
+  });
   const historyPos = useRef(-1);
   // What /find (ctrl+f in the Edit view) looked for last, for n and N.
   const lastFind = useRef('');
@@ -434,7 +453,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       return { ok: false, error: new Error('busy') };
     }
     const controller = new AbortController();
-    const b = { label, started: Date.now(), abort: () => controller.abort() };
+    const b = { label, started: Date.now(), abort: () => controller.abort(), signal: controller.signal };
     busyRef.current = b;
     setBusy(b);
     const id = addEntry({ title, status: 'running' });
@@ -493,6 +512,35 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       confirmRef.current = full;
       setConfirmReq(full);
     });
+  // A question that something else can also put away: { answer, close }. `answer` resolves with the
+  // option picked, or 'closed' when `close()` took it away first (a device sign-in that finished).
+  const notice = (req) => {
+    let close;
+    const answer = new Promise((done) => {
+      const full = { options: [{ label: 'Cancel', value: false }], ...req, id: nextId.current++, done };
+      confirmRef.current = full;
+      setConfirmReq(full);
+      close = () => {
+        if (confirmRef.current !== full) return;
+        confirmRef.current = null;
+        setConfirmReq(null);
+        done('closed');
+      };
+    });
+    return { answer, close };
+  };
+  // `fn(signal)` under the task running now (its esc cancels it), or, with none, as a task of its own
+  // titled `title`: a sign-in that a send needs before it can go. A failure is said once, by the task.
+  const withSignal = async (title, fn, { label, done = 'Done' } = {}) => {
+    if (busyRef.current) return fn(busyRef.current.signal);
+    let out;
+    const r = await task(title, async (signal) => {
+      out = await fn(signal);
+      return { stdout: done };
+    }, { label });
+    if (!r.ok) throw Object.assign(r.error, { noted: true });
+    return out;
+  };
   const onConfirm = (value) => {
     const req = confirmRef.current;
     confirmRef.current = null;
@@ -536,7 +584,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}),
         file: d?.variables ?? {},
         responses: named,
-        env: { azToken, secret: (name) => credentials.get(name) },
+        env: { azToken, secret: (name) => credentials.get(name), auth: (kind, id) => a.authToken(ctx, kind, id) },
       };
     },
     // The open file's contract: { source, spec, operations, error } (spec null without one).
@@ -614,6 +662,17 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       }
       showResponses();
     },
+    // An event stream's response so far, on screen while it comes; setResponse keeps the whole of it.
+    setLiveResponse: (request, sentAs, partial) => {
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response: partial, at: Date.now() } };
+      showResponses();
+    },
+    view: () => viewRef.current,
+    mockServer: () => mockRef.current,
+    setMockServer: (m) => {
+      mockRef.current = m;
+      setMockServerState(m);
+    },
     history: () => historyRef.current.entries,
     // The History view, its cursor on `entry`, and the entry shown.
     showHistoryEntry: (entry) => {
@@ -631,6 +690,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // A view that takes keys the app would otherwise use (the Response view's search) says so here.
     claimsKey: null,
     askSecret: (req) => confirm({ ...req, secret: true, options: [] }),
+    notice,
+    withSignal,
+    tokens: tokensRef.current,
+    openUrl,
     credentials,
     askClaude,
     send: (request) => a.send(ctx, request),
@@ -715,6 +778,9 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       if (dataRef.current) readContract(dataRef.current);
     },
     showText: (title, text, opts = {}) => setOverlay({ title, text, ...opts }),
+    // A WebSocket's session (websocket.js), live over the view; it closes when the view does.
+    showSocket: (session, title) => setOverlay({ kind: 'socket', session, title, onClosed: () => session.close() }),
+    sendOnSocket: (session, text) => a.socketSend(ctx, session, text),
     // A list to pick from: { title, hint, items | load, onPick, keys, empty } (see Picker.jsx).
     // `replace`: swaps the picker on screen for this one (the same list, redrawn after a change), keeping
     // where it goes back to, instead of opening on top of it.
@@ -922,13 +988,13 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
 
   // .http files to /open, looked for while that's being typed.
   const files = focus === 'prompt' && prompt.value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [];
-  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { user: customRef.current.commands, data, files }) : [];
+  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { user: customRef.current.commands, data, files, environment: environment() }) : [];
   const sel = Math.min(sugIndex, Math.max(0, suggestions.length - 1));
 
   // Line editing in the prompt.
   const promptKeys = (input, key) => {
     const { value, cursor } = promptRef.current;
-    const items = suggestionsFor(value, { user: customRef.current.commands, data: dataRef.current, files: value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [] });
+    const items = suggestionsFor(value, { user: customRef.current.commands, data: dataRef.current, files: value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [], environment: environment() });
     const pick = items[Math.min(sugIndex, items.length - 1)];
     const edit = (v, c) => {
       setPrompt(v, c);
@@ -1129,6 +1195,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     main = <Palette items={paletteList} query={overlay.query} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onPick={runPicked} onClose={() => queueMicrotask(ctx.closeOverlay)} />;
   } else if (overlay?.kind === 'help') {
     main = <HelpView sections={custom.sections} start={overlay.start} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onClose={ctx.closeOverlay} />;
+  } else if (overlay?.kind === 'socket') {
+    main = <SocketView key={overlay.session.started} session={overlay.session} title={overlay.title} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onClose={ctx.closeOverlay} />;
   } else if (overlay?.kind === 'picker') {
     main = <Picker key={overlay.id} picker={overlay} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} />;
   } else if (overlay) {
@@ -1164,6 +1232,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         ? 'type to filter · ↑↓ pick · ↵ run it (a key in the view; a command that takes more goes into the prompt) · esc close'
         : overlay?.kind === 'picker'
           ? 'j/k move · ↵ change · esc close'
+          : overlay?.kind === 'socket'
+          ? 'type a message · ↵ send it · ↑↓ pgup pgdn scroll back · esc close the connection'
           : overlay
             ? 'j/k scroll · space page · y copy · esc close'
             : HINTS[view];
@@ -1171,7 +1241,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
 
   return (
     <Box flexDirection="column" width={W} height={H}>
-      <Header data={data} env={environment()} width={W} loading={loading} mood={mood} />
+      <Header data={data} env={environment()} width={W} loading={loading} mood={mood} mock={mockServer} />
       <Tabs view={view} entries={entries} width={W} />
       <Box height={mainH} width={W}>
         {main}

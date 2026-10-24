@@ -15,8 +15,10 @@
 // already), `>>! ./out.json` over it. Comments like `# @no-redirect` before the request line or among the headers are
 // directives, kept in `options`.
 
-// GRAPHQL is JetBrains': a GraphQL query, POSTed as JSON (bodies.js).
-export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT', 'GRAPHQL'];
+// GRAPHQL is JetBrains': a GraphQL query, POSTed as JSON (bodies.js). WEBSOCKET too: a connection whose
+// body is the messages to send, between === lines (websocket.js). GRPC: a unary call to
+// host:port/package.Service/Method, its body the request message as JSON (grpc.js).
+export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT', 'GRAPHQL', 'WEBSOCKET', 'GRPC'];
 
 const SEPARATOR = /^###/;
 const COMMENT = /^\s*(#|\/\/)/;
@@ -204,6 +206,7 @@ export function highlightLines(lines, from = 0, to = lines.length) {
   let boundary = null;
   let partHeaders = false;
   let graphql = false;
+  let socket = false;
   const comment = (l) => [{ text: l, kind: /^\s*(#|\/\/)\s*@[a-z]/i.test(l) && !NAME.test(l) ? 'directive' : 'comment' }];
   const headerRuns = (l) => {
     const h = /^(\s*[^:\s][^:]*?)(\s*:\s*)(.*)$/.exec(l);
@@ -215,6 +218,7 @@ export function highlightLines(lines, from = 0, to = lines.length) {
       boundary = null;
       partHeaders = false;
       graphql = false;
+      socket = false;
       return [{ text: l, kind: 'separator' }];
     }
     if (state === 'handler') return [{ text: l, kind: /^\s*>>!?\s/.test(l) || /^\s*>\s*[^\s{>]/.test(l) ? 'file' : 'handler' }];
@@ -232,6 +236,7 @@ export function highlightLines(lines, from = 0, to = lines.length) {
         else return headerRuns(l);
       }
       if (/^\s*<@?\s+\S/.test(l)) return [{ text: l, kind: 'file' }];
+      if (socket && /^===(\s+wait-for-server)?\s*$/.test(l)) return [{ text: l, kind: 'boundary' }];
       const op = graphql ? /^(\s*)(query|mutation|subscription|fragment)\b(.*)$/.exec(l) : null;
       if (op) return [{ text: op[1] }, { text: op[2], kind: 'keyword' }, ...withPlaceholders(op[3], undefined)];
       return withPlaceholders(l, undefined);
@@ -245,6 +250,7 @@ export function highlightLines(lines, from = 0, to = lines.length) {
       if (!m) return withPlaceholders(l, undefined);
       state = 'query';
       graphql = (m[1] ?? '').toUpperCase() === 'GRAPHQL';
+      socket = (m[1] ?? '').toUpperCase() === 'WEBSOCKET';
       const runs = [];
       const method = /^(\s*)([A-Za-z]+)(\s+)/.exec(l);
       let rest = l;

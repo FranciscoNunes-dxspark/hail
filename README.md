@@ -29,6 +29,7 @@ npm start -- api.http
 hail api.http     # that file
 hail              # the first .http (or .rest) file in this folder or the two below it
 hail test api.http [--env dev] [--contract-strict]   # send them all without the screen and report (for CI)
+hail mock api.http [--port 4010] [--env dev]         # serve the responses kept for them, until ctrl+c
 ```
 
 With none, `/new` writes an example to start from.
@@ -88,6 +89,58 @@ query Hero($id: ID!) {
 { "id": "{{heroId}}" }
 ```
 
+A WebSocket, as JetBrains writes one: `WEBSOCKET` and a `ws://` (or `wss://`) URL (an `http(s)://` one,
+as `{{host}}` often is, is taken as `ws(s)://`), headers, and after a
+blank line the messages to send, each under a `===` line. `=== wait-for-server` waits for a message
+from the server before the next one goes (two such lines wait for two).
+
+```http
+### Chat
+WEBSOCKET {{host}}/chat
+Authorization: Bearer {{token}}
+
+===
+{ "type": "join", "room": "ops" }
+=== wait-for-server
+{ "type": "say", "text": "hello" }
+```
+
+`↵` opens it in a view of its own, live: each message as it goes (`→`) or comes (`←`), with the time,
+JSON indented, newest at the bottom (`↑`/`↓` and the page keys scroll back). Type a message on the line
+under them and `↵` sends it, its `{{variables}}` filled in; every key is text there. `esc` closes the
+connection and the view. The conversation is then kept as the request's response (status 101), in the
+history too, with the secrets it carried left out. `Sec-WebSocket-Protocol` asks for subprotocols. A run
+of the whole file (`A`, `hail test`) leaves WebSockets out.
+
+A gRPC call, as JetBrains writes one: `GRPC`, the server's `host:port`, the service's full name and the
+method, headers as the call's metadata, and the request message as JSON:
+
+```http
+### An order
+GRPC localhost:50051/shop.Orders/Get
+Authorization: Bearer {{token}}
+
+{ "orderId": 42 }
+```
+
+Hail learns the service's types from the server's own reflection service (`grpc.reflection.v1`, or the
+older `v1alpha`), so it needs no `.proto` files, but the server must have reflection on. The answer is a
+response like any other: the message as JSON (proto3's JSON: fields by their JSON names, enums by name,
+64-bit numbers as strings, bytes as base64, Timestamp, Duration, the wrappers and Struct as their JSON),
+the metadata and `grpc-status` as headers, and gRPC's status made the nearest HTTP one (`OK` 200,
+`NOT_FOUND` 404, `UNAUTHENTICATED` 401…) with its name and message beside it, so response handlers,
+`/send all`, `hail test` and `/load` work on it. The URL is plain text (HTTP/2 without TLS) unless it
+starts with `grpcs://` or `https://`, which use TLS (`SSLConfiguration` skips the check, as for
+https). Only unary calls are made: a streaming method is refused, saying so; client certificates,
+compressed messages, `google.protobuf.Any` and proto2 groups aren't supported.
+
+A response that's a stream of server-sent events (`Content-Type: text/event-stream`) shows as it comes:
+the Response view opens on it and keeps its newest events on screen (scrolling up stops that, `G` goes
+back), each event under a line with its number, `event:` and `id:`, its data JSON indented, and the
+spinner counts them. It goes on until the server ends it or `esc` stops it, which keeps what came; then
+it's kept like any response. In a run of the whole file (or `hail test`) an endless stream needs a
+`# @timeout`, which ends it there rather than failing it.
+
 Hail reads the file again whenever it's saved, so it can sit beside your editor, or you can edit it
 in Hail itself.
 
@@ -133,6 +186,30 @@ lines), `-G`, `-I`, `-A`, `-e`, `-b` and `-m` (`# @timeout`) carry over; options
 runs (`--compressed`, `-L`, `-s`, `-o`…) are dropped, and the ones that mean something Hail does
 another way (`-k`) are named when it's added.
 
+### Importing from Postman, a browser or an OpenAPI document
+
+`/import <file>` adds the requests in another tool's file to the end of the open one, through the editor
+(so `ctrl+z` in Edit takes them out again), and picks the first; `/import <file> --new` (or with no
+file open) writes them to a `.http` file of their own beside it, named after it, and opens that. What it
+reads:
+
+| File | What comes in |
+| --- | --- |
+| A Postman collection (v2.0 or v2.1) | A request per item, named after its folders and itself (`### Orders / Get order`); the collection's variables as `@variables` (Postman's `{{var}}`s work as they are, and `:id` in a path becomes `{{id}}`); raw, form, multipart (files as `< path` lines), GraphQL and file bodies; bearer, basic and API-key auth as headers (or the query). Pre-request and test scripts, and other kinds of auth, are left out, and said |
+| A Postman environment | An environment of `http-client.env.json`, beside the file, by its name |
+| A HAR file (a browser's "Save all as HAR") | A request per entry, named after its method and path, its body indented when it's JSON. Cookies, `Authorization` and the like are left out (said), and so are the headers that belong to the connection |
+| An OpenAPI 3 or Swagger 2 document, JSON or YAML | A request per operation, named by its summary (and `# @name` its operationId), to `{{host}}` (declared from the servers or host and basePath, unless the file or environment has one); path parameters, and the query and header ones it requires, as variables declared with an example; a JSON body made from the schema's examples (or its types); `Accept`; the security it asks for as a header |
+
+Nothing secret is written: a credential that was in the file becomes a `{{$secret …}}` placeholder (asked
+for the first time it's used, or saved now with `/secret`), and one that was a variable stays the
+variable; what became placeholders is said. OpenAPI's OAuth 2 and OpenID Connect become
+`{{$auth.token("<scheme>")}}`, for an environment's `"Security"` (see [OAuth 2](#oauth-2)). A variable the
+file or its environment has already isn't declared again. `/draft` is the way to have Claude write
+requests from a description that isn't one of these (or to pick some of them).
+
+An `Authorization: Basic user:password` header (or `Basic user password`) is encoded as it goes out, as
+VS Code's REST Client does, so the password can be a `{{$secret}}`.
+
 ### Variables
 
 `{{name}}` in the URL, the headers or the body. Values come from, first to last:
@@ -144,12 +221,68 @@ another way (`-k`) are named when it's added.
 | The file | `@name = value` lines |
 | Earlier responses | `{{login.response.body.token}}` is the `token` field of what the request named `login` (`# @name login`) got back; a path like `data.items[0].id` (or `$.data…`) reaches further in, `.headers.X-Request-Id` reads a header |
 | Secrets | `{{$secret api-key}}`: kept in the system's own credential store (Windows Credential Manager, the macOS Keychain, the Secret Service keyring on Linux), never in a file. The first request that needs one asks for it in a hidden field and saves it; `/secret <name>` saves or replaces one, `/secret` lists them to replace or forget |
+| Sign-ins | `{{$auth.token("api")}}`: an OAuth 2 access token for the environment's auth called `api` (see [OAuth 2](#oauth-2)); `{{$auth.idToken("api")}}` its ID token |
 | Built-ins | `{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt 1 100}}`, `{{$processEnv NAME}}` or `{{$env.NAME}}` (this computer's environment), `{{$azToken [resource]}}` (a token from the Azure CLI's sign-in, Azure Resource Manager's unless a resource is named) |
 
 A secret can sit in an environment file too (`"apiKey": "{{$secret prod-api-key}}"`), so the file can
 be committed. The environment wins over the file, so a file can hold defaults that environments override. A
 variable can be made of others. A request with a variable nothing gives a value isn't sent: Hail
 says which.
+
+### OAuth 2
+
+As in JetBrains, an environment can say how to sign in, under `"Security"`, and a request uses the
+token with `{{$auth.token("<id>")}}`:
+
+```json
+{
+  "dev": {
+    "host": "http://localhost:3000",
+    "Security": {
+      "Auth": {
+        "api": {
+          "Type": "OAuth2",
+          "Grant Type": "Authorization Code",
+          "Auth URL": "https://login.example.com/authorize",
+          "Token URL": "https://login.example.com/token",
+          "Client ID": "my-app",
+          "Client Secret": "{{$secret my-app-secret}}",
+          "Scope": "openid offline_access api",
+          "Redirect URL": "http://127.0.0.1:8765/callback"
+        }
+      }
+    }
+  }
+}
+```
+
+```http
+GET {{host}}/me
+Authorization: Bearer {{$auth.token("api")}}
+```
+
+| Setting | |
+| --- | --- |
+| `"Type"` | `"OAuth2"` |
+| `"Grant Type"` | `"Client Credentials"`, `"Password"`, `"Authorization Code"` or `"Device Authorization"` (Implicit isn't supported) |
+| `"Token URL"`, `"Client ID"` | Every grant needs them |
+| `"Client Secret"` | When the client has one; best as `{{$secret name}}`, asked for and kept in the system's store. `"Client Credentials": "basic"` sends the client's id and secret as an `Authorization: Basic` header, `"none"` sends no secret; they go in the form unless said |
+| `"Scope"` | What to ask for |
+| `"Auth URL"`, `"Redirect URL"`, `"PKCE"` | Authorization Code: the sign-in page opens in the browser, and Hail catches the code on this machine at the Redirect URL (which has to be `http://127.0.0.1:<port>/…` or `http://localhost:<port>/…`, as the app is registered with; without one, any free port and `/callback`). PKCE (S256) is used unless `"PKCE": false`; `{ "Code Challenge Method": "Plain", "Code Verifier": "…" }` sets it. If the browser doesn't open, the page's address is in the Log. Hail waits five minutes; `esc` stops waiting |
+| `"Device Auth URL"` | Device Authorization: the code to enter and the page to enter it at show where questions do (↵ opens the page or copies the code), and Hail polls until you've signed in there; `esc` cancels |
+| `"Username"`, `"Password"` | Password grant (best as `{{$secret …}}`) |
+| `"Audience"`, `"Resource"`, `"Custom Request Parameters"` | Sent with the sign-in and token requests; a custom parameter can be `{ "Value": "…", "Use": "In Auth Request" }` (or `"In Token Request"`) |
+| `"Use ID Token"` | `true`: `{{$auth.token}}` gives the ID token |
+
+Every value can use variables. The config can be split between the env files, so the private one
+holds the secret; `"$shared"` works too. A token is kept in memory, for the file and environment,
+until it runs out, then refreshed; a refresh token, when the server gives one, is kept in the system's
+credential store (never in a file), so the next time Hail opens it refreshes rather than asks you to
+sign in again. Tokens are secrets to the history and the activity lines: they're blanked wherever they
+turn up. `/auth` lists the environment's sign-ins and how each stands (never the token): `↵` signs in
+again, `x` forgets it; `/auth <id>` signs in with one now; `/auth clear` forgets them all.
+`hail test` signs in with Client Credentials and Password itself, and uses a refresh token Hail kept
+for the others (a browser or device sign-in needs Hail once).
 
 ### Checking responses
 
@@ -235,6 +368,29 @@ how long it took and how many requests a second, the latency's p50, p90, p95, p9
 sparkline of the latency over the run, how many came back with each status, and the errors (no answer,
 out of time) counted by kind. None of it is kept in the history, which stays the responses you sent
 yourself; the summary line stays in the Log. Up to 5,000 requests, 100 at a time.
+
+### A mock of the API
+
+`/mock` serves the open file's API on `http://127.0.0.1:4010` (`/mock 5000` on another port), for a
+frontend or a test to point at while the real one is away: each request's latest response kept in the
+history (its status, headers and body) is answered to the same method and path, a `{{variable}}` in the
+path matching any segment (`GET {{host}}/users/{{id}}` answers `/users/7`), and the path that `{{host}}`
+itself has in the environment counted (`http://localhost:3000/api` makes it `/api/users/7`). A request
+the file has no response for gets the example of the [contract](#contract-drift)'s operation, when there's
+one; anything else a 404 whose JSON lists what is served. It follows the history: send a request again
+and the mock answers with the new response. Credential headers and cookies aren't handed on, and it
+answers browsers' CORS questions. The header shows `mock :4010` while it runs, each request it gets is a
+line in the Log, and `/mock` again (or `/mock off`) stops it; it stops when Hail closes.
+
+From the shell, without the screen, until `ctrl+c`:
+
+```bash
+hail mock api.http --port 4010 --env dev
+```
+
+prints what it serves and a line per request it gets, reading the history again as Hail adds to it.
+Bosun can run it as one of a project's processes, beside the frontend that uses it (in `bosun.json`, or
+a `Procfile` line: `mock: hail mock api.http --port 4010`).
 
 ### Contract drift
 
@@ -336,6 +492,17 @@ lines in `.env` files) the line Trawl connects with: `/azure-sql <server> [datab
 signed in with Entra ID, else `/add <name> <server> [database]` with its port, `--kind`, `--user` and `--trust-cert` as the
 connection says, never its password (Trawl asks for that). `↵` copies the one under the cursor.
 
+`/timeline` shows the family's activity log: what each of the five apps did that the others would want
+to know (Splice's pushes, Trawl's writes, Bosun's restarts and crashes…), newest first, with the app and
+the project it was in. `p` shows this project's alone (the checkout the open file is in, and entries that
+name none), or everything again; `↵` shows an entry whole, `y` copies it. Hail adds a `/load` run's
+summary, a `/send all` that failed (and which requests), the mock starting and stopping, OAuth sign-ins
+(the auth's name and grant, never a token) and imports: names, counts and where, nothing secret.
+
+`/wiring` shows what the open file's project points at, read from its folder and the checkout it's in:
+the addresses, hosts, ports and connection strings in `appsettings*.json`, `.env` files and
+`http-client.env.json`, grouped by the file they're in, every password, key and token in them masked.
+
 Each app's mascot also says how it feels, in a small file the others read (`~/.family`). Hoot's mood
 (happy after a response, worried when one failed its checks or something went wrong, busy while
 sending) is written whenever it changes, and every 30 seconds Hoot looks at the others': when one of
@@ -411,10 +578,13 @@ and Trawl.
 | `/load [request] [count] [concurrency]` | Send a request many times, so many at once (200, 10 at a time, unless said), and report how it held up |
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
+| `/import <file> [--new]` | Add the requests in a Postman collection, a HAR recording or an OpenAPI or Swagger document (or a Postman environment, to `http-client.env.json`); `--new` writes them to a file of their own |
 | `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |
 | `/open <file.http>` | Open another file |
+| `/mock [port\|off]` | Serve the responses kept for this file's requests (and the contract's examples) on `http://127.0.0.1:4010`, or stop it |
 | `/contract [file\|url\|off]` | Check every response against an OpenAPI or Swagger document, remembered for the file (`off` forgets it) |
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
+| `/auth [id\|clear]` | The environment's OAuth sign-ins and how each stands (`↵` signs in again, `x` forgets it); an id signs in with it; `clear` forgets them all |
 | `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |
 | `/history [clear]` | The responses kept for this file (`clear` forgets them) |
 | `/cookies [clear]` | The cookies kept for this file and environment (`clear` forgets them) |
@@ -422,6 +592,8 @@ and Trawl.
 | `/new [file.http]` | Write an example file to start from (`requests.http`) and open it |
 | `/take <family:v1:…>` | Take what a sibling app copied (see [With the sibling apps](#with-the-sibling-apps)) |
 | `/family` | What this project offers the sibling apps: the command for Splice, Bosun or Trawl, copied with `↵` |
+| `/timeline` | What the family's apps did, newest first (`p` this project only, `↵` an entry whole, `y` copies it) |
+| `/wiring` | What this project points at: addresses, hosts, ports and connection strings in its settings, secrets masked |
 | `/run <command>` | Run a shell command (as `!` does) |
 | `/last` | All the output of the last command |
 | `/settings` | Accent colour, theme, mouse, updates, notifications, family moods, history |
