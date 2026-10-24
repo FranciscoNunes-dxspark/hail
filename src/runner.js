@@ -45,6 +45,9 @@ export async function exchange(req, { signal, globals = {}, fetch, jar = null, i
   return { response, checks, globals: after, saved };
 }
 
+/** Whether `request` is sent in a run of the whole file (/send all, hail test): a WebSocket is opened on its own. */
+export const inRun = (request) => request.method !== 'WEBSOCKET';
+
 /** `path` with -1, -2… before its extension: out.json, out-1.json. */
 export function numbered(path, n) {
   if (!n) return path;

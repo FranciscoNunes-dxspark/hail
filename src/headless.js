@@ -9,7 +9,7 @@ import { createJar } from './cookies.js';
 import { defaultEnvironment } from './environments.js';
 import { findHttpFiles, loadHttpFile } from './files.js';
 import { checkContract, loadContract } from './contract.js';
-import { exchange, reportLines, runFailed } from './runner.js';
+import { exchange, inRun, reportLines, runFailed } from './runner.js';
 import { prepare } from './send.js';
 import { createTokens, fillAuthConfig, readAuthConfig, refreshName } from './oauth.js';
 
@@ -101,7 +101,8 @@ export async function runTests(args, { print = console.log, printError = console
       if (a.contract || a.strict) return 2;
     }
   }
-  print(`${data.name}${env ? ` · ${env}` : ''} · ${data.requests.length} request${data.requests.length === 1 ? '' : 's'}${contract ? ` · contract ${source}` : ''}\n`);
+  const sockets = data.requests.length - data.requests.filter(inRun).length;
+  print(`${data.name}${env ? ` · ${env}` : ''} · ${data.requests.length} request${data.requests.length === 1 ? '' : 's'}${sockets ? ` (${sockets} WebSocket${sockets === 1 ? '' : 's'} left out)` : ''}${contract ? ` · contract ${source}` : ''}\n`);
   const secret = async (name) => {
     try {
       return (await credentials?.get(name)) ?? null;
@@ -124,7 +125,8 @@ export async function runTests(args, { print = console.log, printError = console
   let globals = {};
   const results = [];
   let stopped = false;
-  for (const request of data.requests) {
+  const requests = data.requests.filter(inRun);
+  for (const request of requests) {
     const scope = { globals, environment: data.environments.vars(env), file: data.variables, responses, env: { azToken, secret, auth } };
     let req;
     try {
@@ -149,6 +151,6 @@ export async function runTests(args, { print = console.log, printError = console
       break;
     }
   }
-  print(plainReport(reportLines(results, { left: data.requests.slice(results.length), stopped, strict: a.strict }), { color }));
+  print(plainReport(reportLines(results, { left: requests.slice(results.length), stopped, strict: a.strict }), { color }));
   return runFailed(results, { strict: a.strict }) ? 1 : 0;
 }

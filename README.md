@@ -88,6 +88,29 @@ query Hero($id: ID!) {
 { "id": "{{heroId}}" }
 ```
 
+A WebSocket, as JetBrains writes one: `WEBSOCKET` and a `ws://` (or `wss://`) URL (an `http(s)://` one,
+as `{{host}}` often is, is taken as `ws(s)://`), headers, and after a
+blank line the messages to send, each under a `===` line. `=== wait-for-server` waits for a message
+from the server before the next one goes (two such lines wait for two).
+
+```http
+### Chat
+WEBSOCKET {{host}}/chat
+Authorization: Bearer {{token}}
+
+===
+{ "type": "join", "room": "ops" }
+=== wait-for-server
+{ "type": "say", "text": "hello" }
+```
+
+`↵` opens it in a view of its own, live: each message as it goes (`→`) or comes (`←`), with the time,
+JSON indented, newest at the bottom (`↑`/`↓` and the page keys scroll back). Type a message on the line
+under them and `↵` sends it, its `{{variables}}` filled in; every key is text there. `esc` closes the
+connection and the view. The conversation is then kept as the request's response (status 101), in the
+history too, with the secrets it carried left out. `Sec-WebSocket-Protocol` asks for subprotocols. A run
+of the whole file (`A`, `hail test`) leaves WebSockets out.
+
 Hail reads the file again whenever it's saved, so it can sit beside your editor, or you can edit it
 in Hail itself.
 

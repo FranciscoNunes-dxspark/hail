@@ -37,6 +37,7 @@ import { RequestsView } from './RequestsView.jsx';
 import { ResponseView } from './ResponseView.jsx';
 import { EditView } from './EditView.jsx';
 import { TextViewer } from './TextViewer.jsx';
+import { SocketView } from './SocketView.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
 import { FACES, familyMood, moodFor, reactionLine } from '../pet.js';
 
@@ -757,6 +758,9 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       if (dataRef.current) readContract(dataRef.current);
     },
     showText: (title, text, opts = {}) => setOverlay({ title, text, ...opts }),
+    // A WebSocket's session (websocket.js), live over the view; it closes when the view does.
+    showSocket: (session, title) => setOverlay({ kind: 'socket', session, title, onClosed: () => session.close() }),
+    sendOnSocket: (session, text) => a.socketSend(ctx, session, text),
     // A list to pick from: { title, hint, items | load, onPick, keys, empty } (see Picker.jsx).
     // `replace`: swaps the picker on screen for this one (the same list, redrawn after a change), keeping
     // where it goes back to, instead of opening on top of it.
@@ -1171,6 +1175,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     main = <Palette items={paletteList} query={overlay.query} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onPick={runPicked} onClose={() => queueMicrotask(ctx.closeOverlay)} />;
   } else if (overlay?.kind === 'help') {
     main = <HelpView sections={custom.sections} start={overlay.start} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onClose={ctx.closeOverlay} />;
+  } else if (overlay?.kind === 'socket') {
+    main = <SocketView key={overlay.session.started} session={overlay.session} title={overlay.title} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} onClose={ctx.closeOverlay} />;
   } else if (overlay?.kind === 'picker') {
     main = <Picker key={overlay.id} picker={overlay} ctx={ctx} width={W} height={mainH} active={focus === 'view' && !confirmReq} />;
   } else if (overlay) {
@@ -1206,6 +1212,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         ? 'type to filter · ↑↓ pick · ↵ run it (a key in the view; a command that takes more goes into the prompt) · esc close'
         : overlay?.kind === 'picker'
           ? 'j/k move · ↵ change · esc close'
+          : overlay?.kind === 'socket'
+          ? 'type a message · ↵ send it · ↑↓ pgup pgdn scroll back · esc close the connection'
           : overlay
             ? 'j/k scroll · space page · y copy · esc close'
             : HINTS[view];

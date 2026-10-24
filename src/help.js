@@ -104,6 +104,7 @@ export const HELP = [
     rows: [
       ['< ./body.json', 'The body from a file, as it is (<@ fills in its variables)'],
       ['multipart', 'Content-Type: multipart/form-data; boundary=X, then --X lines between parts, each with its headers, a blank line and its value\na part\'s value can be < ./photo.png, sent byte for byte · --X-- ends it'],
+      ['WEBSOCKET ws://…', "A WebSocket: messages after the headers, each under a === line; === wait-for-server waits for the server's next message first\n↵ opens it live: → sent, ← received (JSON indented) · type a message, ↵ sends it · ↑↓ scroll back · esc closes it\nthe conversation is kept as its response · a run of the whole file leaves WebSockets out"],
       ['GRAPHQL url', 'A GraphQL query as the body, then its variables as a JSON object after a blank line; sent as a POST of { query, variables }\n(X-REQUEST-TYPE: GraphQL on a POST does the same)'],
     ],
   },

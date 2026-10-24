@@ -12,7 +12,9 @@ import { pathArg, writeExample } from './files.js';
 import { previousOf } from './history.js';
 import { run } from './run.js';
 import { checkSummary } from './checks.js';
-import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
+import { exchange, inRun, reportLines, runFailed, summaryLine } from './runner.js';
+import { openSocket, socketMessages, socketUrl, transcript } from './websocket.js';
+import { fill } from './variables.js';
 import { loadReport, loadStats, loadSummary, parseLoadArgs, runLoad } from './load.js';
 import { GRANT_NAMES, authorizationCode, deviceAuthorization, fillAuthConfig, grantName, readAuthConfig, refreshName } from './oauth.js';
 import { formatSize, prepare, prettyBody, send as sendRequest, toCurl } from './send.js';
@@ -106,6 +108,7 @@ export async function send(ctx, which) {
   if (!req) return;
   // The secrets in it stay out of the activity lines.
   const shown = req.secrets.reduce((t, v) => t.split(v).join('••••••'), req.url);
+  if (request.method === 'WEBSOCKET') return openWebSocket(ctx, request, req, shown);
   return ctx.task(
     `${req.method} ${shown}`,
     async (signal) => {
@@ -120,14 +123,45 @@ export async function send(ctx, which) {
 }
 
 /**
+ * ↵ on a WEBSOCKET request: the connection opens in a view of its own, the file's messages go as the
+ * server answers, and what's typed there goes too. When it closes, the conversation is kept as the
+ * request's response (status 101), in the history too, with the secrets filled in left out.
+ */
+async function openWebSocket(ctx, request, req, shown) {
+  const url = socketUrl(req.url);
+  const session = await openSocket({ url, headers: req.headers, messages: socketMessages(req.body), insecure: ctx.environmentOptions().insecure });
+  // Typed messages may fill in secrets too; they join the request's, so the history leaves them out.
+  session.secrets = req.secrets;
+  ctx.showSocket(session, `WEBSOCKET ${socketUrl(shown)}`);
+  session.ended.then(() => {
+    const body = transcript(session.log);
+    ctx.setResponse(request, { ...req, url }, { status: 101, statusText: 'WebSocket', headers: [], body, ms: Date.now() - session.started, size: Buffer.byteLength(body), url });
+    const failed = !session.sent && !session.received && session.log.some((m) => m.dir === 'error');
+    ctx.note(`WebSocket ${socketUrl(shown)} closed\n${failed ? session.log.find((m) => m.dir === 'error').text : `${session.sent} sent · ${session.received} received`}`, failed ? 'error' : 'info');
+  });
+  return session;
+}
+
+/** ↵ in a WebSocket's view: what was typed, its {{variables}} filled in, sent. */
+export async function socketSend(ctx, session, text) {
+  const scope = ctx.scope();
+  const used = new Set();
+  const r = await fill(text, { ...scope, env: { ...scope.env, used } });
+  if (r.missing.length) return ctx.note(missingText(ctx, r.missing), 'error');
+  // Whatever secret it used stays out of the history, as the request's do.
+  session.secrets?.push(...used);
+  session.send(r.text);
+}
+
+/**
  * A and /send all: every request in the file, top to bottom, each with the variables the ones before
  * it left (their responses, the globals their handlers set). A request with a variable nothing answers
  * is passed over; one that gets no answer stops the run; failed tests don't. The report shows after.
  */
 export async function sendAll(ctx) {
   if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
-  const requests = ctx.data.requests;
-  if (!requests.length) return ctx.note('The file has no requests yet.', 'error');
+  const requests = ctx.data.requests.filter(inRun);
+  if (!requests.length) return ctx.note(ctx.data.requests.length ? 'The file has only WebSockets, which ↵ opens one at a time.' : 'The file has no requests yet.', 'error');
   const results = [];
   let stopped = false;
   const done = await ctx.task(
@@ -228,6 +262,7 @@ export async function load(ctx, rest) {
 export async function copyCurl(ctx, which) {
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note('Pick a request first.', 'error');
+  if (!inRun(request)) return ctx.note("A WebSocket isn't something curl sends.", 'error');
   const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (req) ctx.copy(toCurl(req, { dir: ctx.data.dir }), 'it as curl');
 }
