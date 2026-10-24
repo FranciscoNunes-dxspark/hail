@@ -36,6 +36,7 @@ export const HELP = [
       ['A', 'Send them all, top to bottom (/send all), and show a report: each one\'s status, time and tests'],
       ['c', 'Copy it as a curl command, variables filled in'],
       ['I', 'Import a curl command (/import-curl): paste it, ↵ adds it to the file as a request'],
+      ['/import <file>', 'Add the requests in a Postman collection, a HAR recording or an OpenAPI/Swagger document (ctrl+z in Edit undoes it)\na Postman environment goes into http-client.env.json · --new writes them to a file of their own\ncredentials become {{$secret}} placeholders, said; cookies and auth headers in a HAR are left out'],
       ['L', 'Load in a pinch: starts /load <it> 200 10 (count, then how many at once) for you to change and ↵\nlatency percentiles, requests a second, statuses, errors and a sparkline over time · esc stops it'],
       ['y', 'Copy its URL'],
       ['i', 'Edit the file, typing, on this request'],

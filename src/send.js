@@ -46,6 +46,7 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
     body = request.bodyFile.fill ? await f(text) : text;
     if (!request.bodyFile.fill && !isGraphql(method, headers)) payload = await reading(readBytes, 'the body file')(path);
   }
+  headers = headers.map(([k, v]) => [k, /^authorization$/i.test(k) ? basicAuth(v) : v]);
   const boundary = multipartBoundary(headers);
   if (boundary && body) payload = await multipartPayload(body, { readBytes: reading(readBytes, 'the file'), readText: reading(read, 'the file'), fill: f });
   if (isGraphql(method, headers)) {
@@ -68,6 +69,18 @@ export async function prepare(request, scope, { dir = process.cwd(), read = (p) 
     output = { path: at(path), shown: path, overwrite: request.output.overwrite };
   }
   return { method, url, headers, body, ...(payload ? { payload } : {}), missing: [...new Set(missing)], secrets: [...used], handlers, output, options: request.options ?? {} };
+}
+
+/**
+ * An Authorization header's value with `Basic user:password` (or `Basic user password`, as VS Code's REST
+ * Client takes it) encoded as Basic auth is sent; one that's encoded already is left as it is.
+ */
+export function basicAuth(value) {
+  const m = /^Basic\s+(.+)$/i.exec(String(value ?? ''));
+  if (!m) return value;
+  const cred = m[1].trim();
+  if (!/[:\s]/.test(cred)) return value;
+  return `Basic ${Buffer.from(cred.includes(':') ? cred : cred.replace(/\s+/, ':')).toString('base64')}`;
 }
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);

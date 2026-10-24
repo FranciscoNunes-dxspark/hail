@@ -8,6 +8,7 @@ export const COMMANDS = [
   { name: 'env', args: '[name]', desc: 'The environment the variables come from (a list to pick from if none is named)', complete: 'environments', run: (ctx, s) => a.chooseEnvironment(ctx, s) },
   { name: 'curl', args: '[request]', desc: 'Copy a request, filled in, as a curl command', complete: 'requests', run: (ctx, s) => a.copyCurl(ctx, s) },
   { name: 'import-curl', args: '<curl command>', desc: 'Add a request to the file from a curl command (a browser\'s Copy as cURL, from any shell)', run: (ctx, s) => a.importCurl(ctx, s) },
+  { name: 'import', args: '<file> [--new]', desc: 'Add requests from a Postman collection (or environment), a HAR recording, or an OpenAPI or Swagger document; --new writes them to a file of their own', run: (ctx, s) => a.importFrom(ctx, s) },
   { name: 'contract', args: '[openapi file|url|off]', desc: 'Check every response against an OpenAPI or Swagger document (remembered for the file; off forgets it, nothing says which)', run: (ctx, s) => a.contract(ctx, s) },
   { name: 'find', args: '<text>', desc: 'Find text in the file, in the Edit view (n and N go on to the next and the one before)', run: (ctx, s) => ctx.findInEditor(s) },
   { name: 'open', args: '<file.http>', desc: 'Open another .http file', complete: 'files', run: (ctx, s) => a.open(ctx, s) },

@@ -163,6 +163,30 @@ lines), `-G`, `-I`, `-A`, `-e`, `-b` and `-m` (`# @timeout`) carry over; options
 runs (`--compressed`, `-L`, `-s`, `-o`…) are dropped, and the ones that mean something Hail does
 another way (`-k`) are named when it's added.
 
+### Importing from Postman, a browser or an OpenAPI document
+
+`/import <file>` adds the requests in another tool's file to the end of the open one, through the editor
+(so `ctrl+z` in Edit takes them out again), and picks the first; `/import <file> --new` (or with no
+file open) writes them to a `.http` file of their own beside it, named after it, and opens that. What it
+reads:
+
+| File | What comes in |
+| --- | --- |
+| A Postman collection (v2.0 or v2.1) | A request per item, named after its folders and itself (`### Orders / Get order`); the collection's variables as `@variables` (Postman's `{{var}}`s work as they are, and `:id` in a path becomes `{{id}}`); raw, form, multipart (files as `< path` lines), GraphQL and file bodies; bearer, basic and API-key auth as headers (or the query). Pre-request and test scripts, and other kinds of auth, are left out, and said |
+| A Postman environment | An environment of `http-client.env.json`, beside the file, by its name |
+| A HAR file (a browser's "Save all as HAR") | A request per entry, named after its method and path, its body indented when it's JSON. Cookies, `Authorization` and the like are left out (said), and so are the headers that belong to the connection |
+| An OpenAPI 3 or Swagger 2 document, JSON or YAML | A request per operation, named by its summary (and `# @name` its operationId), to `{{host}}` (declared from the servers or host and basePath, unless the file or environment has one); path parameters, and the query and header ones it requires, as variables declared with an example; a JSON body made from the schema's examples (or its types); `Accept`; the security it asks for as a header |
+
+Nothing secret is written: a credential that was in the file becomes a `{{$secret …}}` placeholder (asked
+for the first time it's used, or saved now with `/secret`), and one that was a variable stays the
+variable; what became placeholders is said. OpenAPI's OAuth 2 and OpenID Connect become
+`{{$auth.token("<scheme>")}}`, for an environment's `"Security"` (see [OAuth 2](#oauth-2)). A variable the
+file or its environment has already isn't declared again. `/draft` is the way to have Claude write
+requests from a description that isn't one of these (or to pick some of them).
+
+An `Authorization: Basic user:password` header (or `Basic user password`) is encoded as it goes out, as
+VS Code's REST Client does, so the password can be a `{{$secret}}`.
+
 ### Variables
 
 `{{name}}` in the URL, the headers or the body. Values come from, first to last:
@@ -497,6 +521,7 @@ and Trawl.
 | `/load [request] [count] [concurrency]` | Send a request many times, so many at once (200, 10 at a time, unless said), and report how it held up |
 | `/env [name]` | The environment the variables come from (a list to pick from if none is named) |
 | `/curl [request]` | Copy a request, filled in, as a curl command |
+| `/import <file> [--new]` | Add the requests in a Postman collection, a HAR recording or an OpenAPI or Swagger document (or a Postman environment, to `http-client.env.json`); `--new` writes them to a file of their own |
 | `/import-curl <command>` | Add a request to the end of the file from a curl command, and pick it |
 | `/open <file.http>` | Open another file |
 | `/contract [file\|url\|off]` | Check every response against an OpenAPI or Swagger document, remembered for the file (`off` forgets it) |

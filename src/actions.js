@@ -1,12 +1,13 @@
 // Every user-facing operation, written once: keys and slash commands both call these with `ctx`
 // (built in ui/App.jsx). Questions before anything destructive belong here too (ctx.confirm).
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { clip, draftPrompt, parseDraft } from './claude.js';
 import { configFile } from './config.js';
 import { driftSummary, loadContract } from './contract.js';
 import { curlToHttp, parseCurl } from './curl.js';
+import { KIND_NAMES, importText } from './importers.js';
 import { changedOnly, lineDiff } from './diff.js';
 import { pathArg, writeExample } from './files.js';
 import { previousOf } from './history.js';
@@ -432,6 +433,65 @@ export async function importCurl(ctx, text) {
   const title = block.split('\n')[0].replace(/^###\s*/, '');
   const left = parsed.ignored.length ? `\nLeft out: ${parsed.ignored.join(', ')}${parsed.ignored.includes('-k') ? ' (an environment\'s "SSLConfiguration": { "verifyHostCertificate": false } skips checking certificates)' : ''}` : '';
   ctx.note(`Added ${title} to ${ctx.data.name}${left}`, 'ok');
+}
+
+/**
+ * /import <file> [--new]: requests from a Postman collection, a HAR recording or an OpenAPI (or Swagger)
+ * document, added to the end of the open file through the editor (ctrl+z undoes it), or with --new (or
+ * no file open) written to a new .http file beside it and opened. A Postman environment goes into
+ * http-client.env.json. Credentials become {{$secret}} placeholders, which is said.
+ */
+export async function importFrom(ctx, rest) {
+  const fresh = /(^|\s)--new(?=\s|$)/.test(rest);
+  const arg = pathArg(rest.replace(/(^|\s)--new(?=\s|$)/, ' '));
+  if (!arg) return ctx.prefill('/import ');
+  const dir = ctx.data?.dir ?? process.cwd();
+  const path = resolve(dir, arg);
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (e) {
+    return ctx.note(`Couldn't read ${arg}: ${e.code === 'ENOENT' ? "there's no such file" : e.message}`, 'error');
+  }
+  const env = ctx.environment();
+  const taken = new Set(fresh ? [] : [...Object.keys(ctx.data?.variables ?? {}), ...Object.keys(ctx.data?.environments.vars(env) ?? {})]);
+  let r;
+  try {
+    r = importText(text, basename(path), { taken });
+  } catch (e) {
+    return ctx.note(e.message, 'error');
+  }
+  const notes = r.notes.length ? `\n${r.notes.join('\n')}` : '';
+  if (r.kind === 'postman-env') {
+    const envPath = join(dir, 'http-client.env.json');
+    let envs = {};
+    try {
+      envs = JSON.parse(readFileSync(envPath, 'utf8'));
+    } catch (e) {
+      if (e.code !== 'ENOENT') return ctx.note(`Couldn't add it to http-client.env.json, which can't be read: ${e.message}`, 'error');
+    }
+    const { name, vars } = r.environment;
+    envs[name] = { ...envs[name], ...vars };
+    writeFileSync(envPath, `${JSON.stringify(envs, null, 2)}\n`);
+    await ctx.reload();
+    ctx.note(`Added the environment ${name} (${Object.keys(vars).length} variable${Object.keys(vars).length === 1 ? '' : 's'}) to http-client.env.json: e picks it${notes}`, 'ok');
+    return { kind: r.kind };
+  }
+  if (!r.requests) return ctx.note(`There are no requests in ${basename(path)}.`, 'error');
+  const what = `${r.requests} request${r.requests === 1 ? '' : 's'} from ${basename(path)} (${KIND_NAMES[r.kind]})`;
+  if (fresh || !ctx.data) {
+    const target = join(dir, `${basename(path).replace(/\.(json|ya?ml|har)$/i, '')}.http`);
+    if (existsSync(target)) return ctx.note(`${basename(target)} is there already: /open it and /import ${arg} without --new adds to it.`, 'error');
+    writeFileSync(target, r.text);
+    await ctx.openFile(target);
+    ctx.note(`Imported ${what} into ${basename(target)}${notes}`, 'ok');
+  } else {
+    const at = ctx.appendRequests(r.text);
+    if (at < 0) return;
+    ctx.goToRequest(at);
+    ctx.note(`Imported ${what} into ${ctx.data.name}: ctrl+z in Edit undoes it${notes}`, 'ok');
+  }
+  return { kind: r.kind, requests: r.requests };
 }
 
 /** /cookies [clear]: the cookies kept for this file and environment, or forgets them. */
