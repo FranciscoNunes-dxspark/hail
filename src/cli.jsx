@@ -3,15 +3,28 @@ import { render } from 'ink';
 import { resolve } from 'node:path';
 import { COMPILED, VERSION } from './version.js';
 import { loadConfig } from './config.js';
-import { setAccent } from './theme.js';
+import { applyTheme } from './theme.js';
 import { App } from './ui/App.jsx';
 import { findHttpFiles } from './files.js';
 import { ask } from './claude.js';
 import { checkForUpdate, installUpdate, removeOldExecutables } from './update.js';
 import { copyToClipboard } from './clipboard.js';
 import { terminalMouse } from './mouse.js';
+import { notification } from './notify.js';
 
 const args = process.argv.slice(2);
+
+// hail test api.http [--env dev]: every request without the UI, for CI.
+if (args[0] === 'test') {
+  const { runTests } = await import('./headless.js');
+  const { osCredentials } = await import('./credentials.js');
+  const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  const code = await runTests(args.slice(1), { credentials: osCredentials, color });
+  // Everything written gets out before exiting, piped or not (pipes are asynchronous on Windows).
+  await new Promise((r) => process.stdout.write('', r));
+  await new Promise((r) => process.stderr.write('', r));
+  process.exit(code);
+}
 
 if (args.includes('-v') || args.includes('--version')) {
   console.log(`hail ${VERSION}`);
@@ -20,9 +33,14 @@ if (args.includes('-v') || args.includes('--version')) {
 
 if (args.includes('-h') || args.includes('--help')) {
   console.log(`hail [file.http]
+hail test [file.http] [--env <name>] [--contract <openapi>] [--contract-strict]
 
 An HTTP client for the terminal, over .http files. Opens [file.http], or the
 first .http file in the current folder (or the folders under it).
+
+hail test sends every request in the file without the UI, prints a report of
+their response handlers' tests and how they compare with the contract, and
+exits with 1 if anything failed (drift only with --contract-strict).
 
 Inside: ↵ sends the request under the cursor, e picks the environment,
 ? shows every key, / the commands.`);
@@ -35,7 +53,8 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 }
 
 const config = loadConfig();
-setAccent(config.accent);
+// The theme (dark, light, or auto from the terminal) and the accent, before anything is drawn.
+applyTheme(config);
 
 // Draw on the alternate screen, like a full-screen app, and give the terminal back untouched on exit.
 // The window title is saved on the terminal's title stack and popped on exit. Terminals without one
@@ -57,7 +76,7 @@ const copy = (text) => copyToClipboard(text);
 const given = args.find((x) => !x.startsWith('-'));
 const file = given ? resolve(given) : findHttpFiles(process.cwd()).map((f) => resolve(f))[0];
 const app = render(
-  <App config={config} initialFile={file} askClaude={ask} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} />,
+  <App config={config} initialFile={file} askClaude={ask} checkUpdate={checkUpdate} installUpdate={COMPILED ? installUpdate : undefined} setTitle={setTitle} mouse={mouse} copy={copy} notify={(title, body) => process.stdout.write(notification(title, body))} />,
   // Through the mouse's stdout, which watches the frames to select text from.
   { exitOnCtrlC: false, stdout: mouse?.stdout ?? process.stdout },
 );

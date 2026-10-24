@@ -113,6 +113,31 @@ test('searching a response: matches as you type, n to the next, esc clears it, a
     app.stdin.write('/');
     await type(app.stdin, 'q');
     await until(() => frame().includes('/q▏ no match'), 'q searched for');
+    // The headers, shown with h, are searched too, and the body's matches move down under them.
+    app.stdin.write(KEYS.esc);
+    await until(() => !frame().includes('/q'), 'that search cleared');
+    app.stdin.write('/');
+    await type(app.stdin, 'json');
+    app.stdin.write(KEYS.enter);
+    await until(() => frame().includes('/json no match'), 'nothing in the body');
+    app.stdin.write('h');
+    await until(() => frame().includes('/json 1/1'), 'the Content-Type header found');
+    app.stdin.write(KEYS.esc);
+    app.stdin.write('/');
+    await type(app.stdin, 'bow');
+    app.stdin.write(KEYS.enter);
+    await until(() => frame().includes('/bow 1/2'), 'the body still searched under the headers');
+    app.stdin.write('n');
+    await until(() => frame().includes('/bow 2/2') && /❯?.*"bowsprit"/.test(frame()), 'the second match');
+    // Typing on narrows the matches; a capital makes the search match case.
+    app.stdin.write(KEYS.esc);
+    app.stdin.write('/');
+    await type(app.stdin, 'bowl');
+    await until(() => frame().includes('/bowl▏ 1/1'), 'bowline alone');
+    app.stdin.write(KEYS.backspace);
+    await until(() => frame().includes('/bow▏ 1/2'), 'both again');
+    await type(app.stdin, 'S');
+    await until(() => frame().includes('/bowS▏ no match'), 'no capital S in the body');
   } finally {
     app.unmount();
   }

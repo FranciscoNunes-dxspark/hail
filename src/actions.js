@@ -5,13 +5,22 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { clip, draftPrompt, parseDraft } from './claude.js';
 import { configFile } from './config.js';
+import { driftSummary, loadContract } from './contract.js';
+import { curlToHttp, parseCurl } from './curl.js';
 import { changedOnly, lineDiff } from './diff.js';
-import { writeExample } from './files.js';
+import { pathArg, writeExample } from './files.js';
 import { previousOf } from './history.js';
 import { run } from './run.js';
+import { checkSummary } from './checks.js';
+import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
+import { loadReport, loadStats, loadSummary, parseLoadArgs, runLoad } from './load.js';
 import { formatSize, prepare, prettyBody, send as sendRequest, toCurl } from './send.js';
-import { settingRows, settingSegments } from './settings.js';
-import { DEFAULT_ACCENT, isColour, setAccent, theme } from './theme.js';
+import { parseTimeout } from './transport.js';
+import { nextTheme, settingRows, settingSegments } from './settings.js';
+import { applyTheme, defaultAccent, isColour, setAccent, theme } from './theme.js';
+import { checkLines, contractLines, statusColour } from './ui/response.js';
+import { APP_NAMES, contextIn, copiedNote, describeContext, notMine, projectAt, repoRoot, shareLine, trawlLine } from './family.js';
+import { findByRequestId, hostVariable, idsIn, replayBlock, startsWithVariable, rowsJson, rowsRequestBlock, tablePath } from './takes.js';
 
 const YES_NO = (yes) => [
   { label: yes, value: true },
@@ -34,28 +43,56 @@ function requestNamed(ctx, name) {
 }
 
 /**
- * The request with its variables filled in, or null (and why) when some have no value. A secret
- * that isn't saved yet ({{$secret name}}) is asked for, saved, and the request filled in again.
+ * The request with its variables filled in, or null when a secret it needs was asked for and not
+ * given. A secret that isn't saved yet ({{$secret name}}) is asked for, saved, and the request filled
+ * in again. `missing` on what it returns lists the variables nothing gave a value.
  */
-async function prepared(ctx, request) {
+async function fillRequest(ctx, request) {
   let req = await prepare(request, ctx.scope(), { dir: ctx.data.dir });
   const unsaved = req.missing.map((m) => /^\$secret\s+(\S+)$/.exec(m)?.[1]).filter(Boolean);
   if (unsaved.length) {
     for (const name of unsaved) if (!(await askForSecret(ctx, name))) return null;
     req = await prepare(request, ctx.scope(), { dir: ctx.data.dir });
   }
-  if (!req.missing.length) return req;
+  return req;
+}
+
+/** Why a request with variables nothing answers isn't sent, in words. */
+function missingText(ctx, missing) {
   const env = ctx.environment();
-  ctx.note(
-    `Nothing gives ${req.missing.map((m) => `{{${m}}}`).join(', ')} a value\n${env ? `The environment is ${env}; e picks another.` : 'Pick an environment with e, or set it with @name = value in the file.'}`,
-    'error',
-  );
+  return `Nothing gives ${missing.map((m) => `{{${m}}}`).join(', ')} a value\n${env ? `The environment is ${env}; e picks another.` : 'Pick an environment with e, or set it with @name = value in the file.'}`;
+}
+
+/** The request with its variables filled in, or null (and why) when some have no value. */
+async function prepared(ctx, request) {
+  const req = await fillRequest(ctx, request);
+  if (!req) return null;
+  if (!req.missing.length) return req;
+  ctx.note(missingText(ctx, req.missing), 'error');
   return null;
 }
 
-/** ↵ in Requests, and /send: sends it, and shows what came back. */
+/** Sends a filled-in request with what the session holds for it, and keeps what came back. */
+async function exchangeFor(ctx, request, req, signal) {
+  const out = await exchange(req, { signal, globals: ctx.globals(), jar: ctx.cookieJar(), insecure: ctx.environmentOptions().insecure });
+  ctx.setGlobals(out.globals);
+  ctx.setResponse(request, req, out.response, { checks: out.checks, saved: out.saved });
+  return { ...out, contract: ctx.contractFor({ request: req, response: out.response }) ?? undefined };
+}
+
+/** What a response says in the activity lines: its status, time and size, and how its tests went. */
+function responseSummary({ response: res, checks, saved, contract }) {
+  const summary = checkSummary(checks);
+  const drift = contract?.issues.length ? [`⚠ ${driftSummary(contract)}`] : [];
+  const failed = (checks?.tests ?? []).filter((t) => !t.passed).map((t) => `✗ ${t.name}`);
+  const save = saved?.error ?? (saved ? `Saved to ${saved.shown}` : null);
+  return [`${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}${summary.text ? ` · ${summary.text}` : ''}`, ...(save ? [save] : []), ...failed, ...(checks?.error ? [checks.error] : []), ...drift].join('\n');
+}
+
+/** ↵ in Requests, and /send: sends it, and shows what came back. `/send all` sends every one. */
 export async function send(ctx, which) {
   if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  if (typeof which === 'string' && which.trim().toLowerCase() === 'all' && !ctx.data.requests.some((r) => r.name?.toLowerCase() === 'all')) return sendAll(ctx);
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note(which ? `There's no request called ${which}.` : 'The file has no requests yet.', 'error');
   const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
@@ -65,12 +102,119 @@ export async function send(ctx, which) {
   return ctx.task(
     `${req.method} ${shown}`,
     async (signal) => {
-      const res = await sendRequest(req, { signal });
-      ctx.setResponse(request, req, res);
-      return { stdout: `${res.status} ${res.statusText} · ${res.ms} ms · ${formatSize(res.size)}` };
+      const out = await exchangeFor(ctx, request, req, signal);
+      const failed = checkSummary(out.checks).failed;
+      const drift = out.contract?.issues.length ?? 0;
+      const worried = failed ? `${failed} check${failed === 1 ? '' : 's'} failed` : drift ? `${drift} difference${drift === 1 ? '' : 's'} from the contract` : undefined;
+      return { stdout: responseSummary(out), worried };
     },
     { label: 'Sending' },
   );
+}
+
+/**
+ * A and /send all: every request in the file, top to bottom, each with the variables the ones before
+ * it left (their responses, the globals their handlers set). A request with a variable nothing answers
+ * is passed over; one that gets no answer stops the run; failed tests don't. The report shows after.
+ */
+export async function sendAll(ctx) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const requests = ctx.data.requests;
+  if (!requests.length) return ctx.note('The file has no requests yet.', 'error');
+  const results = [];
+  let stopped = false;
+  const done = await ctx.task(
+    `Send all ${requests.length} request${requests.length === 1 ? '' : 's'} in ${ctx.data.name}`,
+    async (signal) => {
+      for (const request of requests) {
+        if (signal.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+        let req;
+        try {
+          req = await fillRequest(ctx, request);
+        } catch (e) {
+          results.push({ request, skipped: e.message });
+          continue;
+        }
+        if (!req) {
+          results.push({ request, skipped: 'a secret it needs wasn\'t given' });
+          continue;
+        }
+        if (req.missing.length) {
+          results.push({ request, skipped: `nothing gives ${req.missing.map((m) => `{{${m}}}`).join(', ')} a value` });
+          continue;
+        }
+        try {
+          results.push({ request, ...(await exchangeFor(ctx, request, req, signal)) });
+        } catch (e) {
+          if (e.cancelled) throw e;
+          results.push({ request, error: e.message });
+          stopped = true;
+          break;
+        }
+      }
+      const text = summaryLine(results, { stopped });
+      if (runFailed(results)) throw new Error(text);
+      return { stdout: text };
+    },
+    { label: 'Sending all' },
+  );
+  if (!results.length) return;
+  const cancelled = done.error?.cancelled;
+  const left = requests.slice(results.length);
+  const lines = reportLines(results, { left, stopped: stopped || cancelled });
+  ctx.showText(`Sent all: ${ctx.data.name}${ctx.environment() ? ` · ${ctx.environment()}` : ''}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
+}
+
+/** A report's lines (runner.js's or load.js's segments, by tone) in the viewer's colours. */
+const toned = (lines) => {
+  const tones = { add: theme.add, del: theme.del, dim: theme.dim, warn: theme.warn, accent: theme.accent };
+  return lines.map((segs) => segs.map(({ text, tone, status, bold }) => ({ text, bold, color: status ? statusColour(status) : tones[tone] })));
+};
+
+/**
+ * /load [request] [count] [concurrency] (L in Requests): the request, its variables filled in once, sent
+ * `count` times, `concurrency` at a time, through the same send as ↵ but without the cookie jar, its
+ * response handlers or >> saving, and nothing kept in the history. The spinner counts them; esc stops it
+ * and reports what finished. Up to 5,000 requests, 100 at a time.
+ */
+export async function load(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const args = parseLoadArgs(rest);
+  if (args.problem) return ctx.note(args.problem, 'error');
+  const request = requestNamed(ctx, args.name);
+  if (!request) return ctx.note(args.name ? `There's no request called ${args.name}.` : 'The file has no requests yet.', 'error');
+  const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
+  if (!req) return;
+  const { count, concurrency } = args;
+  const options = req.options ?? {};
+  const insecure = ctx.environmentOptions().insecure;
+  let run = null;
+  let shownAt = 0;
+  const done = await ctx.task(
+    `Load ${request.label}: ${count} × ${concurrency} at a time`,
+    async (signal) => {
+      run = await runLoad({
+        count,
+        concurrency,
+        signal,
+        sendOne: (s) => sendRequest(req, { signal: s, jar: null, follow: !options['no-redirect'], timeout: parseTimeout(options.timeout), insecure }),
+        onProgress: (results) => {
+          // The spinner says how far it's got, at most ten times a second.
+          if (Date.now() - shownAt < 100 && results.length < count) return;
+          shownAt = Date.now();
+          const errors = results.filter((r) => r.error).length;
+          ctx.setBusyLabel(`Load: ${results.length}/${count}${errors ? ` · ${errors} error${errors === 1 ? '' : 's'}` : ''}`);
+        },
+      });
+      return { stdout: loadSummary(loadStats(run), { count, cancelled: run.cancelled }) };
+    },
+    { label: `Load: 0/${count}` },
+  );
+  if (!done.ok || !run?.results.length) return;
+  const stats = loadStats(run);
+  const lines = loadReport(stats, { label: `${req.method} ${request.label}`, count, concurrency, cancelled: run.cancelled });
+  ctx.showText(`Load: ${request.label}`, lines.map((segs) => segs.map((x) => x.text).join('')).join('\n'), { lines: toned(lines) });
+  return { stats };
 }
 
 /** c in Requests, and /curl: the request, filled in, as a curl command on the clipboard. */
@@ -78,7 +222,7 @@ export async function copyCurl(ctx, which) {
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note('Pick a request first.', 'error');
   const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
-  if (req) ctx.copy(toCurl(req), 'it as curl');
+  if (req) ctx.copy(toCurl(req, { dir: ctx.data.dir }), 'it as curl');
 }
 
 /**
@@ -130,8 +274,8 @@ export async function secret(ctx, name) {
   });
 }
 
-/** A kept response, as the viewer's coloured lines: the request as sent, then what came back. */
-export function entryLines(entry) {
+/** A kept response, as the viewer's coloured lines: the request as sent, then what came back (and how it compares with `contract`). */
+export function entryLines(entry, contract = null) {
   const { request: q, response: r } = entry;
   const out = [
     [{ text: `${q.method} ${q.url}`, bold: true }],
@@ -139,6 +283,9 @@ export function entryLines(entry) {
     ...(q.body ? [[], ...q.body.split('\n').map((l) => [{ text: l }])] : []),
     [],
     [{ text: `${r.status} ${r.statusText}`, bold: true, color: r.status < 400 ? theme.add : theme.del }, { text: `  ${r.ms} ms · ${formatSize(r.size)} · ${new Date(entry.at).toLocaleString()}`, color: theme.dim }],
+    ...(entry.saved ? [[{ text: entry.saved.error ?? `Saved to ${entry.saved.shown}`, color: entry.saved.error ? theme.del : theme.dim }]] : []),
+    ...checkLines(entry.checks),
+    ...contractLines(contract),
     ...r.headers.map(([k, v]) => [{ text: `${k}: `, color: theme.dim }, { text: v }]),
     [],
     ...prettyBody(r).split('\n').map((l) => [{ text: l }]),
@@ -149,7 +296,7 @@ export function entryLines(entry) {
 
 /** ↵ in History: a kept response in the viewer. */
 export function showEntry(ctx, entry) {
-  ctx.showText(`${entry.label} · ${new Date(entry.at).toLocaleString()}`, prettyBody(entry.response), { lines: entryLines(entry) });
+  ctx.showText(`${entry.label} · ${new Date(entry.at).toLocaleString()}`, prettyBody(entry.response), { lines: entryLines(entry, ctx.contractFor?.(entry)) });
 }
 
 /** d in History: how a response differs from the one before it to the same request. */
@@ -212,6 +359,86 @@ export async function draft(ctx, rest) {
   ctx.note(`Added ${answer.requests.length} request${answer.requests.length === 1 ? '' : 's'} to ${basename(target)}`, 'ok');
 }
 
+/**
+ * /import-curl <command> (I in Requests): a curl command line, as a browser's "Copy as cURL" gives it in
+ * any shell, added to the end of the file as a request named after its method and path, and picked.
+ */
+export async function importCurl(ctx, text) {
+  if (!text.trim()) return ctx.prefill('/import-curl ');
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  let parsed;
+  try {
+    parsed = parseCurl(text);
+  } catch (e) {
+    return ctx.note(e.message, 'error');
+  }
+  const block = curlToHttp(parsed);
+  const at = ctx.appendRequests(block);
+  if (at < 0) return;
+  ctx.goToRequest(at);
+  const title = block.split('\n')[0].replace(/^###\s*/, '');
+  const left = parsed.ignored.length ? `\nLeft out: ${parsed.ignored.join(', ')}${parsed.ignored.includes('-k') ? ' (an environment\'s "SSLConfiguration": { "verifyHostCertificate": false } skips checking certificates)' : ''}` : '';
+  ctx.note(`Added ${title} to ${ctx.data.name}${left}`, 'ok');
+}
+
+/** /cookies [clear]: the cookies kept for this file and environment, or forgets them. */
+export function cookies(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const jar = ctx.cookieJar();
+  const env = ctx.environment();
+  const where = `${ctx.data.name}${env ? ` in ${env}` : ''}`;
+  if (rest.trim() === 'clear') {
+    const n = jar.clear();
+    return ctx.note(n ? `Forgot the ${n} cookie${n === 1 ? '' : 's'} kept for ${where}` : `No cookies kept for ${where}.`);
+  }
+  if (rest.trim()) return ctx.note('/cookies shows them; /cookies clear forgets them.', 'error');
+  const list = jar.list();
+  if (!list.length) return ctx.note(`No cookies kept for ${where} yet: a response's Set-Cookie puts them here.`);
+  const lines = [];
+  let site = null;
+  for (const c of list) {
+    if (c.domain !== site) {
+      if (site !== null) lines.push([]);
+      site = c.domain;
+      lines.push([{ text: `${c.hostOnly ? '' : '.'}${c.domain}`, bold: true, color: theme.accent }]);
+    }
+    const flags = [c.path, c.expires === null ? 'until Hail closes' : `until ${new Date(c.expires).toLocaleString()}`, c.secure ? 'https only' : '', c.httpOnly ? 'HttpOnly' : ''].filter(Boolean).join(' · ');
+    lines.push([{ text: `  ${c.name}`, bold: true }, { text: `=${c.value}` }, { text: `  ${flags}`, color: theme.dim }]);
+  }
+  ctx.showText(`Cookies: ${where} · ${list.length}`, list.map((c) => `${c.domain}\t${c.path}\t${c.name}=${c.value}`).join('\n'), { lines });
+}
+
+/**
+ * /contract <openapi file or URL>: every response to the open file's requests is checked against it
+ * from now on (remembered for the file); `off` forgets it; nothing says which it is.
+ */
+export async function contract(ctx, rest) {
+  if (!ctx.data) return ctx.note('Open a .http file first: /open <file>, or /new for an example.', 'error');
+  const arg = rest.trim();
+  const cur = ctx.contract();
+  const name = ctx.data.name;
+  if (!arg) {
+    if (!cur.source) return ctx.note(`${name} has no contract. /contract <openapi.json, openapi.yaml or a URL> checks every response against it.`);
+    if (cur.error) return ctx.note(`${name}'s contract, ${cur.source}, couldn't be read: ${cur.error}`, 'error');
+    return ctx.note(`${name} is checked against ${cur.source}${cur.spec ? ` (${cur.operations} operations)` : ''}. /contract off forgets it.`);
+  }
+  if (arg === 'off') {
+    if (!cur.source) return ctx.note(`${name} has no contract to forget.`);
+    ctx.setContract(null);
+    return ctx.note(`${name}'s responses aren't checked against ${cur.source} any more`);
+  }
+  const source = /^https?:\/\//i.test(arg) ? arg : resolve(ctx.data.dir, arg);
+  return ctx.task(
+    `Contract ${arg}`,
+    async (signal) => {
+      const c = await loadContract(source, { dir: ctx.data.dir, signal });
+      ctx.setContract(source, c);
+      return { stdout: `${c.operations} operation${c.operations === 1 ? '' : 's'}: every response to ${name}'s requests is checked against it` };
+    },
+    { label: 'Reading the contract' },
+  );
+}
+
 /** e and /env: the environment the variables come from, named or picked from a list. */
 export function chooseEnvironment(ctx, name) {
   const names = ctx.data?.environments.names ?? [];
@@ -236,7 +463,7 @@ export function chooseEnvironment(ctx, name) {
 /** /open: another .http file. */
 export async function open(ctx, path) {
   if (!path.trim()) return ctx.prefill('/open ');
-  return ctx.openFile(resolve(path.trim()));
+  return ctx.openFile(resolve(pathArg(path)));
 }
 
 /** /new: writes an example .http file (requests.http unless named) and opens it. */
@@ -255,7 +482,7 @@ export function accent(ctx, value) {
     const { accent: _, ...rest } = c;
     return v === 'default' ? rest : { ...c, accent: v };
   });
-  setAccent(v === 'default' ? DEFAULT_ACCENT : v);
+  setAccent(v === 'default' ? null : v);
   redrawSettings(ctx);
 }
 
@@ -284,7 +511,12 @@ async function changeSetting(ctx, row) {
     ctx.setConfig((c) => ({ ...c, [row.id]: c[row.id] === false }));
     return redrawSettings(ctx);
   }
-  if (row.action === 'accent') return ctx.prefill(`/accent ${ctx.config.accent ?? DEFAULT_ACCENT}`);
+  if (row.action === 'accent') return ctx.prefill(`/accent ${ctx.config.accent ?? defaultAccent()}`);
+  if (row.action === 'theme') {
+    ctx.setConfig((c) => ({ ...c, theme: nextTheme(c) }));
+    applyTheme(ctx.config);
+    return redrawSettings(ctx);
+  }
   if (row.action === 'clear') {
     const ok = await ctx.confirm({ title: `Clear the prompt history (${row.value})?`, options: YES_NO('Yes, clear it') });
     if (!ok) return;
@@ -292,3 +524,150 @@ async function changeSetting(ctx, row) {
     redrawSettings(ctx);
   }
 }
+
+/**
+ * /take <context> (or a context pasted bare): what a sibling app copied for Hail. A request (Sonar's
+ * logs) is replayed, rows (Trawl) become a body, a log line (Bosun) is found in the history by its
+ * request id; the other kinds are another app's.
+ */
+export async function take(ctx, rest) {
+  const text = String(rest ?? '').trim();
+  if (!text) return ctx.note('Paste what a sibling app copied for Hail: /take family:v1:…', 'error');
+  const c = contextIn(text);
+  if (!c) return ctx.note("That isn't something a sibling app copied (they start family:v1:).", 'error');
+  if (c.kind === 'request') return takeRequest(ctx, c.data);
+  if (c.kind === 'rows') return takeRows(ctx, c.data);
+  if (c.kind === 'logline') return takeLogline(ctx, c.data);
+  return ctx.note(notMine('hail', c), 'error');
+}
+
+const NO_FILE = 'Open a .http file first: /open <file>, or /new for an example.';
+
+/** The variable the picked environment names the API's address with ({{host}}, {{baseUrl}}), or null. */
+const environmentHost = (ctx) => hostVariable(ctx.data?.environments.vars(ctx.environment()) ?? {});
+
+/**
+ * /take request: a request (Sonar copies them from its logs and incidents) added to the end of the file
+ * as `### replay <METHOD> <path>` and picked, ready to send. When the environment says where the API is
+ * ({{host}}, {{baseUrl}}), it's asked whether to send it there or to where it came from.
+ */
+async function takeRequest(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  if (!data?.url) return ctx.note('That request has no URL.', 'error');
+  const hostVar = environmentHost(ctx);
+  const add = (useHost) => {
+    const { block, dropped } = replayBlock(data, { hostVar: useHost ? hostVar : null });
+    const at = ctx.appendRequests(block);
+    if (at < 0) return;
+    ctx.goToRequest(at);
+    const title = block.split('\n')[0].replace(/^###\s*/, '');
+    ctx.note(`Added ${title} to ${ctx.data.name}: ↵ sends it${dropped.length ? `\nLeft out ${dropped.join(', ')}: credentials don't travel between apps` : ''}`, 'ok');
+  };
+  if (!hostVar || startsWithVariable(data.url)) return add(false);
+  const env = ctx.environment();
+  let origin;
+  try {
+    origin = new URL(data.url).origin;
+  } catch {
+    origin = data.url;
+  }
+  ctx.showPicker({
+    title: `Replay ${String(data.method ?? 'GET').toUpperCase()} ${data.url}`,
+    hint: '↵ add it',
+    items: [
+      { useHost: true, segments: [{ text: `To ${env ?? 'the environment'}`, strong: true }, { text: `  {{${hostVar}}} = ${ctx.data.environments.vars(env)[hostVar]}`, color: theme.dim }] },
+      { useHost: false, segments: [{ text: 'As it came', strong: true }, { text: `  ${origin}`, color: theme.dim }] },
+    ],
+    onPick: (it) => {
+      ctx.closeOverlay();
+      add(it.useHost);
+    },
+  });
+}
+
+/**
+ * /take rows: rows Trawl copied ({ columns, rows, table? }) as a JSON body (an array of objects, or one
+ * object for one row): a new POST request, to {{host}}/<table> when the table is known, or the body of
+ * the request under the cursor replaced. Either goes through the editor, so ctrl+z in Edit undoes it.
+ */
+function takeRows(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  if (!Array.isArray(data?.columns) || !Array.isArray(data?.rows) || !data.rows.length) return ctx.note('Those rows are empty.', 'error');
+  const n = data.rows.length;
+  const what = `${n} row${n === 1 ? '' : 's'}${data.table ? ` of ${data.table}` : ''}`;
+  const hostVar = environmentHost(ctx) ?? 'host';
+  const sel = ctx.selectedRequest();
+  const items = [{ how: 'new', segments: [{ text: 'A new POST request', strong: true }, { text: `  POST {{${hostVar}}}/${tablePath(data.table)}`, color: theme.dim }] }];
+  if (sel) items.push({ how: 'replace', segments: [{ text: `The body of ${sel.label}`, strong: true }, { text: '  replaced', color: theme.dim }] });
+  ctx.showPicker({
+    title: `${what} as a JSON body`,
+    hint: '↵ put it there',
+    items,
+    onPick: (it) => {
+      ctx.closeOverlay();
+      if (it.how === 'replace') {
+        if (!ctx.replaceRequestBody(sel, rowsJson(data))) return;
+        ctx.note(`Put ${what} in the body of ${sel.label}: ctrl+z in Edit undoes it`, 'ok');
+        return ctx.goToRequest(sel.index);
+      }
+      const at = ctx.appendRequests(rowsRequestBlock(data, { hostVar }));
+      if (at < 0) return;
+      ctx.goToRequest(at);
+      ctx.note(`Added a POST of ${what} to ${ctx.data.name}: ctrl+z in Edit undoes it`, 'ok');
+    },
+  });
+}
+
+/**
+ * /take logline: a log line Bosun copied, found in the History by its request id (`requestId`, else the
+ * ids in its text): the newest response whose request or response headers carry it (X-Request-Id,
+ * Request-Id, traceparent, correlation ids), shown with the cursor on it.
+ */
+function takeLogline(ctx, data) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  const ids = data?.requestId ? [String(data.requestId)] : idsIn(data?.text);
+  if (!ids.length) return ctx.note(`That log line has no request id to look for: ${String(data?.text ?? '').slice(0, 80)}`, 'error');
+  const found = findByRequestId(ctx.history(), ids);
+  if (!found) return ctx.note(`No response kept for ${ctx.data.name} carries ${ids.join(' or ')}.\nHistory keeps the newest 300; the request may have come from somewhere else.`, 'error');
+  ctx.showHistoryEntry(found.entry);
+  ctx.note(`${found.entry.label}, ${new Date(found.entry.at).toLocaleString()}: its ${found.header} is ${ids.length === 1 ? ids[0] : 'the one in the log line'}`, 'ok');
+}
+
+/**
+ * What this project offers the sibling apps, as the command lines to paste into them: { app, line, what }.
+ * From the open file's folder and its checkout: Splice opens the checkout, Bosun runs the project when
+ * it has something to run, Trawl connects to each database its settings name.
+ */
+export function familyOffers(dir) {
+  const root = repoRoot(dir);
+  const projects = [projectAt(dir), ...(root && root !== dir ? [projectAt(root)] : [])];
+  const out = [];
+  if (root) out.push({ app: 'splice', line: shareLine('open', [root]), what: 'the checkout' });
+  const crew = projects.find((p) => p.crew);
+  if (crew) out.push({ app: 'bosun', line: shareLine('move', [crew.dir]), what: 'run the project' });
+  const seen = new Set();
+  for (const db of projects.flatMap((p) => p.databases)) {
+    const key = [db.kind, db.server, db.port, db.database].join('|').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ app: 'trawl', line: trawlLine(db, db.name), what: `${db.name} (${db.source})` });
+  }
+  return out;
+}
+
+/** /family: what this project offers the siblings, to pick from; ↵ copies its command line. */
+export function family(ctx) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  const offers = familyOffers(ctx.data.dir);
+  if (!offers.length) return ctx.note(`Nothing here for the sibling apps: ${ctx.data.dir} isn't in a git checkout, has nothing for Bosun to run, and names no databases.`);
+  ctx.showPicker({
+    title: 'For the sibling apps',
+    hint: '↵ copy the command for it',
+    items: offers.map((o) => ({ ...o, segments: [{ text: APP_NAMES[o.app].padEnd(7), color: theme.accent, bold: true }, { text: `${o.what}  `, strong: true }, { text: o.line, color: theme.dim }] })),
+    onPick: (o) => {
+      ctx.copy(o.line, `a command for ${APP_NAMES[o.app]}`);
+      ctx.note(copiedNote(o.app, o.line), 'ok');
+    },
+  });
+}
+

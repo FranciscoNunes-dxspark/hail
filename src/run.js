@@ -47,3 +47,18 @@ export function run(command, { cwd = process.cwd(), signal, input, env } = {}) {
     child.stdin.end(input ?? '');
   });
 }
+
+/**
+ * A signal of its own for one call (a fetch, a pause) under a long-lived `signal` (a task's, a
+ * load's): aborted with it, but tied to it only until `done()`. fetch keeps a listener on the signal
+ * it is given until the request is garbage collected, so many calls on one signal pile listeners up
+ * on it (and Node warns). With no `signal`, the call gets none.
+ */
+export function callSignal(signal) {
+  if (!signal) return { signal: undefined, done: () => {} };
+  const own = new AbortController();
+  const stop = () => own.abort(signal.reason);
+  if (signal.aborted) stop();
+  else signal.addEventListener('abort', stop, { once: true });
+  return { signal: own.signal, done: () => signal.removeEventListener('abort', stop) };
+}

@@ -82,11 +82,36 @@ export const FACES = {
 
 /** How the pet feels right now: about the last result, and whether something is running. */
 export function moodFor({ data, busy, lastEntry, now = Date.now() }) {
-  if (lastEntry?.status === 'error' && now - lastEntry.at < 8000) return 'worried';
+  if ((lastEntry?.status === 'error' || lastEntry?.worried) && now - lastEntry.at < 8000) return 'worried';
   if (busy) return 'look';
   if (lastEntry?.status === 'ok' && now - lastEntry.at < 4000) return 'happy';
   if (!data) return 'idle';
   return 'wave';
+}
+
+/**
+ * Hoot's mood as the sibling apps read it (family.js's writeMood): { mood, reason }, mood being happy,
+ * worried, busy or neutral, and the reason a few words about why ("2 checks failed").
+ */
+export function familyMood(mood, { busy, lastEntry } = {}) {
+  const short = (s) => {
+    const t = String(s ?? '').split('\n')[0].trim();
+    return t.length > 80 ? `${t.slice(0, 79)}…` : t;
+  };
+  if (mood === 'worried') return { mood: 'worried', reason: short(lastEntry?.worried ?? (lastEntry?.lines?.[0] && lastEntry.lines[0] !== 'Cancelled' ? lastEntry.lines[0] : lastEntry?.title)) };
+  if (mood === 'look') return { mood: 'busy', reason: short(busy?.label) };
+  if (mood === 'happy') return { mood: 'happy', reason: short(lastEntry?.title) };
+  return { mood: 'neutral', reason: '' };
+}
+
+/** Hoot's one line about a sibling's mood (family.js's readMoods), or null for one he lets pass. */
+export function reactionLine(m) {
+  const name = String(m?.app ?? '').replace(/^./, (c) => c.toUpperCase());
+  const why = m?.reason ? `: ${m.reason}` : '';
+  if (m?.mood === 'worried') return `${FACES.worried} ${name} looks worried${why}`;
+  if (m?.mood === 'sad') return `${FACES.worried} ${name} is having a bad time${why}`;
+  if (m?.mood === 'happy') return `${FACES.happy} ${name} is happy${why}`;
+  return null;
 }
 
 /** A sentence for the welcome box. */

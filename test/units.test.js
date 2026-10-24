@@ -8,7 +8,8 @@ import { HELP } from '../src/help.js';
 import { commandsSection, sectionLines } from '../src/help-layout.js';
 import { FACES, PALETTE, petPixels, petRows } from '../src/pet.js';
 import { settingRows } from '../src/settings.js';
-import { DEFAULT_ACCENT } from '../src/theme.js';
+import { DEFAULT_ACCENT, LIGHT_ACCENT, applyTheme, backgroundFrom, theme, themeMode } from '../src/theme.js';
+import { methodColour } from '../src/ui/response.js';
 import { assetName, compareVersions, parseChecksums } from '../src/update.js';
 import { run } from '../src/run.js';
 
@@ -39,6 +40,30 @@ test('settings: the rows and their values', () => {
   assert.equal(set.accent.value, '#ff8800');
   assert.equal(set.mouse.value, 'off');
   assert.equal(set.history.action, 'clear');
+});
+
+test('the theme: dark, light, or auto from COLORFGBG, with the accent over it, read as it draws', () => {
+  try {
+    assert.equal(backgroundFrom('15;0'), 'dark');
+    assert.equal(backgroundFrom('0;default;15'), 'light');
+    assert.equal(backgroundFrom(undefined), null);
+    assert.equal(themeMode('auto', { COLORFGBG: '0;7' }), 'light');
+    assert.equal(themeMode(undefined, {}), 'dark');
+    assert.equal(themeMode('dark', { COLORFGBG: '0;15' }), 'dark');
+    const dark = methodColour('GET');
+    assert.equal(applyTheme({ theme: 'light' }, {}), 'light');
+    assert.equal(theme.accent, LIGHT_ACCENT);
+    assert.notEqual(methodColour('GET'), dark, 'the methods follow the theme');
+    const row = settingRows({ theme: 'light' }).find((r) => r.id === 'theme');
+    assert.deepEqual([row.value, row.note, row.action], ['light', 'auto next: from the terminal, else dark', 'theme']);
+    assert.equal(settingRows({}).find((r) => r.id === 'accent').value, `${LIGHT_ACCENT} (default)`);
+    applyTheme({ theme: 'auto', accent: '#123456' }, { COLORFGBG: '15;0' });
+    assert.deepEqual([theme.mode, theme.accent], ['dark', '#123456']);
+    assert.equal(settingRows({}).find((r) => r.id === 'theme').value, 'auto (dark here)');
+  } finally {
+    applyTheme({}, {});
+  }
+  assert.equal(theme.accent, DEFAULT_ACCENT);
 });
 
 test('the pet: every mood is the same size, drawn only in its palette, and has a face', () => {

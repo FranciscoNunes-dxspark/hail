@@ -13,6 +13,12 @@ import { saveConfig } from '../config.js';
 import { HELP } from '../help.js';
 import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
+import { defaultEnvironment } from '../environments.js';
+import { createJar } from '../cookies.js';
+import { checkContract, loadContract } from '../contract.js';
+import { contextIn, pastedLine, readMoods, writeMood } from '../family.js';
+import { replaceBody } from '../takes.js';
+import { worthNotifying } from '../notify.js';
 import { BULLET, theme } from '../theme.js';
 import { fitSegments, stringWidth } from '../text.js';
 import { VERSION } from '../version.js';
@@ -31,7 +37,7 @@ import { ResponseView } from './ResponseView.jsx';
 import { EditView } from './EditView.jsx';
 import { TextViewer } from './TextViewer.jsx';
 import { WELCOME_HEIGHT, Welcome } from './Pet.jsx';
-import { FACES, moodFor } from '../pet.js';
+import { FACES, familyMood, moodFor, reactionLine } from '../pet.js';
 
 const VIEWS = [
   { id: 'requests', label: 'Requests' },
@@ -48,10 +54,12 @@ const helpSections = (user, keymap) => [...HELP, ...[keymapSection(keymap, VIEW_
 
 // ctrl+p, as the terminal sends it: the command palette.
 const CTRL_P = '\x10';
+// How often responses coming one after another redraw the screen, in milliseconds.
+const SHOW_EVERY = 100;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const HINTS = {
-  requests: '↵ send · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
+  requests: '↵ send · A send all · L load · I import curl · i edit it · c copy as curl · y copy the URL · v the response, full view · e environment',
   edit: '↵ or i type · ctrl+r send · ctrl+s save · ctrl+z undo · ctrl+f find · [ ] requests · c copy as curl',
   response: '↵ send again · h headers · y copy the body · j/k space scroll',
   history: '↵ show it · d compare with the one before · D forget them all',
@@ -76,13 +84,6 @@ function Header({ data, env, width, loading, mood }) {
   } else if (loading) segs.push({ text: '  loading…', color: theme.dim });
   const path = data?.dir ?? '';
   return <Row pointer={false} width={width} segments={[...fitSegments(segs, Math.max(20, width - stringWidth(path) - 1)), { text: ' ' }, { text: path, color: theme.dim }]} />;
-}
-
-/** The environment to use for `data`: the one picked for this file last time, else dev or local, else none. */
-export function defaultEnvironment(data, saved) {
-  const names = data?.environments.names ?? [];
-  if (saved && names.includes(saved)) return saved;
-  return names.find((n) => /^(dev|local)/i.test(n)) ?? null;
 }
 
 /** The tabs' labels and the columns each one covers (`from` up to `to`), which clicks are matched against. */
@@ -131,7 +132,10 @@ const DOUBLE_CLICK_MS = 400;
 // terminalMouse() from cli.jsx (missing where the terminal can't report it); tests pass their own.
 // `copy` puts text on the clipboard (cli.jsx's; tests pass a stub). `checkUpdate` and `installUpdate`
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy }) {
+// `notify(title, body)` says a long run has finished (cli.jsx rings the terminal's bell and raises a
+// desktop notification); tests pass a recorder or nothing. `familyEvery` is how often (ms) the sibling
+// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do).
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, familyEvery = 30_000 }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -141,7 +145,18 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // What came back, by request label: { request, response, at }, `request` as it was sent.
   const [responses, setResponses] = useState({});
   const responsesRef = useRef({});
+  // Cookie jars (cookies.js), one per file and environment, for as long as Hail runs.
+  const jarsRef = useRef(new Map());
+  // client.global.set's variables: kept for the open file until another is opened or Hail closes.
+  const globalsRef = useRef({});
+  // The open file's contract (/contract): where it's from, the document, and each response's check of it.
+  const contractRef = useRef({ path: null, source: null, spec: null, error: null, checked: new WeakMap() });
+  const [, setContractTick] = useState(0);
   const selectedRef = useRef(0);
+  // Counts goToRequest's jumps, so the Requests view moves its cursor even while it's on screen.
+  const [jump, setJump] = useState(0);
+  // The History entry to put the cursor on (/take logline), counted so it moves even while on screen.
+  const [historyFocus, setHistoryFocus] = useState(null);
   const fileRef = useRef(initialFile ?? null);
   // The responses kept for the open file, oldest first (history.js), and the file they're kept in.
   const [history, setHistory] = useState([]);
@@ -161,6 +176,22 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     const t = setTimeout(() => setMoodTick((n) => n + 1), 8100);
     return () => clearTimeout(t);
   }, [entries]);
+  // A sibling's mood Hoot remarks on (family.js's readMoods), once each, until esc.
+  const [reaction, setReaction] = useState(null);
+  const seenMoods = useRef(new Set());
+  const familyOn = config.familyMoods !== false;
+  useEffect(() => {
+    if (!familyOn) return setReaction(null);
+    const look = () => {
+      const m = readMoods('hail').find((x) => reactionLine(x) && !seenMoods.current.has(`${x.app}:${x.at}`));
+      if (!m) return;
+      seenMoods.current.add(`${m.app}:${m.at}`);
+      setReaction(m);
+    };
+    look();
+    const t = setInterval(look, familyEvery);
+    return () => clearInterval(t);
+  }, [familyOn, familyEvery]);
   // A word in the bottom line for a moment ("Copied 3 lines"), where it moves nothing on screen.
   const [flash, setFlash] = useState(null);
   useEffect(() => {
@@ -347,14 +378,33 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         const entries = readHistory(hf);
         historyRef.current = { file: hf, entries };
         setHistory(entries);
-        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at }]));
+        responsesRef.current = Object.fromEntries(Object.entries(latestByLabel(entries)).map(([label, e]) => [label, { request: e.request, response: e.response, at: e.at, checks: e.checks, saved: e.saved }]));
         setResponses(responsesRef.current);
+        readContract(d);
       }
     } catch (e) {
       note(`Couldn't read ${basename(file)}: ${firstLine(e.message)}`, 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  // The contract /contract set for file `d`, read when the file opens (and on r); a URL is fetched.
+  const readContract = async (d) => {
+    const source = configRef.current.contracts?.[d.path] ?? null;
+    contractRef.current = { path: d.path, source, spec: null, error: null, checked: new WeakMap() };
+    setContractTick((n) => n + 1);
+    if (!source) return;
+    try {
+      const c = await loadContract(source, { dir: d.dir });
+      if (contractRef.current.path !== d.path || contractRef.current.source !== source) return;
+      contractRef.current = { ...contractRef.current, spec: c.spec, operations: c.operations };
+    } catch (e) {
+      if (contractRef.current.path !== d.path) return;
+      contractRef.current = { ...contractRef.current, error: e.message };
+      note(`The contract for ${d.name}: ${firstLine(e.message)}`, 'error');
+    }
+    setContractTick((n) => n + 1);
   };
 
   const openFile = async (file) => {
@@ -365,6 +415,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     setLoading(true);
     responsesRef.current = {};
     setResponses({});
+    globalsRef.current = {};
     selectedRef.current = 0;
     setOverlay(null);
     setView('requests');
@@ -388,21 +439,52 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     setBusy(b);
     const id = addEntry({ title, status: 'running' });
     setWelcome(false);
+    // A long run that ends says so, for when you've looked away (Settings' "Notify when done").
+    const tell = (line) => notify && worthNotifying(Date.now() - b.started, configRef.current) && notify(`Hail: ${title}`, line);
     try {
-      const { stdout = '', stderr = '' } = await start(controller.signal);
+      // `worried`: it went, but not well (tests failed, the contract drifted), which Hoot shows.
+      const { stdout = '', stderr = '', worried } = await start(controller.signal);
       const out = [stdout.trimEnd(), stderr.trimEnd()].filter(Boolean).join('\n');
       lastOutput.current = { title, text: out || '(no output)' };
-      updateEntry(id, { status: 'ok', lines: out ? out.split('\n') : ['Done'] });
+      updateEntry(id, { status: 'ok', lines: out ? out.split('\n') : ['Done'], ...(worried ? { worried } : {}) });
+      tell(firstLine(out) || 'Done');
       return { ok: true, out };
     } catch (error) {
       lastOutput.current = { title, text: error.message };
       updateEntry(id, { status: 'error', lines: error.cancelled ? ['Cancelled'] : error.message.split('\n') });
+      if (!error.cancelled) tell(firstLine(error.message));
       return { ok: false, error };
     } finally {
       busyRef.current = null;
       setBusy(null);
       if (refresh) await reload();
     }
+  };
+
+  // A response on screen at once, and while they come quicker than that (A sends a file's worth) at
+  // most every SHOW_EVERY ms, so a run isn't spent redrawing; the last always shows. What the screen
+  // gets is the refs as they are then.
+  const shownAt = useRef(0);
+  const showTimer = useRef(null);
+  const showResponses = () => {
+    if (showTimer.current) return;
+    const show = () => {
+      showTimer.current = null;
+      shownAt.current = Date.now();
+      setResponses(responsesRef.current);
+      setHistory(historyRef.current.entries);
+    };
+    const wait = shownAt.current + SHOW_EVERY - Date.now();
+    if (wait <= 0) show();
+    else showTimer.current = setTimeout(show, wait);
+  };
+  useEffect(() => () => clearTimeout(showTimer.current), []);
+
+  // What the spinner says, changed while the task runs (/load's count).
+  const setBusyLabel = (label) => {
+    if (!busyRef.current) return;
+    busyRef.current = { ...busyRef.current, label };
+    setBusy(busyRef.current);
   };
 
   const confirm = (req) =>
@@ -434,6 +516,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const ctx = ctxRef.current;
   Object.assign(ctx, {
     task,
+    setBusyLabel,
     openFile,
     environment,
     setEnvironment: (name) => {
@@ -449,27 +532,95 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       const named = {};
       for (const r of d?.requests ?? []) if (r.name && responsesRef.current[r.label]) named[r.name] = responsesRef.current[r.label].response;
       return {
+        globals: globalsRef.current,
         environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}),
         file: d?.variables ?? {},
         responses: named,
         env: { azToken, secret: (name) => credentials.get(name) },
       };
     },
+    // The open file's contract: { source, spec, operations, error } (spec null without one).
+    contract: () => contractRef.current,
+    // /contract: `source` (null forgets it) and what loadContract read from it, kept for this file.
+    setContract: (source, loaded = null) => {
+      const path = dataRef.current?.path;
+      if (!path) return;
+      setConfig((c) => {
+        const contracts = { ...c.contracts };
+        if (source) contracts[path] = source;
+        else delete contracts[path];
+        return { ...c, contracts };
+      });
+      contractRef.current = { path, source, spec: loaded?.spec ?? null, operations: loaded?.operations, error: null, checked: new WeakMap() };
+      setContractTick((n) => n + 1);
+    },
+    // How a response (`sent`: { request, response }) compares with the contract, worked out once; null without one.
+    contractFor: (sent) => {
+      const c = contractRef.current;
+      if (!c.spec || !sent?.response || !sent.request) return null;
+      if (!c.checked.has(sent.response)) c.checked.set(sent.response, checkContract(c.spec, sent.request, sent.response));
+      return c.checked.get(sent.response);
+    },
+    // The environment's settings (environments.js's options): { insecure }.
+    environmentOptions: () => dataRef.current?.environments.options?.(environment()) ?? {},
+    // The cookies kept for the open file in the environment picked.
+    cookieJar: () => {
+      const key = `${dataRef.current?.path ?? ''}\n${environment() ?? ''}`;
+      if (!jarsRef.current.has(key)) jarsRef.current.set(key, createJar());
+      return jarsRef.current.get(key);
+    },
+    // The global variables response handlers set (client.global.set), for the open file while Hail runs.
+    globals: () => globalsRef.current,
+    setGlobals: (g) => (globalsRef.current = g),
+    // Requests added to the end of the file (/import-curl), as typing them in Edit would: saved at once,
+    // undone with ctrl+z. Resolves with the index of the first one added, or -1 with no file open.
+    appendRequests: (block) => {
+      if (!dataRef.current) return -1;
+      const before = dataRef.current.requests.length;
+      const cur = ed.toText(editorRef.current);
+      const sep = !cur.trim() ? '' : cur.endsWith('\n\n') ? '' : cur.endsWith('\n') ? '\n' : '\n\n';
+      const next = ed.fromText(cur + sep + block);
+      setEditor({ ...next, row: (cur + sep).split('\n').length - 1, col: 0 });
+      saveEditor();
+      return before;
+    },
+    // The body of `request` replaced by `body` (takes.js's replaceBody), as typing it in Edit would:
+    // saved at once, undone with ctrl+z. False with no file open.
+    replaceRequestBody: (request, body) => {
+      if (!dataRef.current) return false;
+      const r = replaceBody(editorRef.current.lines, request.line, body);
+      setEditor({ lines: r.lines, row: r.row, col: 0 });
+      saveEditor();
+      return true;
+    },
+    // Puts the Requests view's cursor on request `i`, on screen.
+    goToRequest: (i) => {
+      selectedRef.current = i;
+      setJump((n) => n + 1);
+      setView('requests');
+    },
     // The views say which request the cursor is on, so commands and the Response view act on it.
     selectRequest: (i) => (selectedRef.current = i),
     selectedRequest: () => dataRef.current?.requests[selectedRef.current] ?? null,
     selectedIndex: () => selectedRef.current,
-    setResponse: (request, sentAs, response) => {
+    // `extra`: { checks, saved } (how its response handlers went, where >> saved its body).
+    setResponse: (request, sentAs, response, extra = {}) => {
       const at = Date.now();
-      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at } };
-      setResponses(responsesRef.current);
+      responsesRef.current = { ...responsesRef.current, [request.label]: { request: sentAs, response, at, ...extra } };
       const h = historyRef.current;
-      if (!h.file) return;
-      const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response });
-      historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
-      setHistory(historyRef.current.entries);
+      if (h.file) {
+        const entry = entryFor({ label: request.label, name: request.name, at, request: sentAs, response, checks: extra.checks, saved: extra.saved });
+        historyRef.current = { file: h.file, entries: appendHistory(h.file, entry, { entries: h.entries }) };
+      }
+      showResponses();
     },
     history: () => historyRef.current.entries,
+    // The History view, its cursor on `entry`, and the entry shown.
+    showHistoryEntry: (entry) => {
+      setHistoryFocus((f) => ({ entry, n: (f?.n ?? 0) + 1 }));
+      setView('history');
+      a.showEntry(ctx, entry);
+    },
     clearHistory: () => {
       const h = historyRef.current;
       if (h.file) clearHistory(h.file);
@@ -559,7 +710,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     viewHasKeys: () => focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && answerKey.current !== keySeq.current,
     overlayHasKeys: () => focusRef.current === 'view' && !confirmRef.current && answerKey.current !== keySeq.current,
     quit: () => exit(),
-    refresh: () => reload(),
+    refresh: async () => {
+      await reload();
+      if (dataRef.current) readContract(dataRef.current);
+    },
     showText: (title, text, opts = {}) => setOverlay({ title, text, ...opts }),
     // A list to pick from: { title, hint, items | load, onPick, keys, empty } (see Picker.jsx).
     // `replace`: swaps the picker on screen for this one (the same list, redrawn after a change), keeping
@@ -596,6 +750,8 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     try {
       let r;
       if (text.startsWith('!')) r = await a.raw(ctx, text.slice(1));
+      // A sibling's context pasted at the prompt without /take (after a / or not).
+      else if (contextIn(text.replace(/^\//, ''))) r = await a.take(ctx, text.replace(/^\//, ''));
       else {
         const [, name, rest] = text.replace(/^\//, '').match(/^(\S+)\s*([\s\S]*)$/);
         const cmd = findCommand(name, customRef.current.commands);
@@ -664,6 +820,17 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   // over an overlay), a key you mapped becomes the key it stands for, for the view and App alike, or
   // runs its command line. Then ctrl+p opens the palette, from a view or the prompt.
   const sendKey = useKeyTranslation((input) => {
+    // A paste while a view has the keys: a command line (or a sibling's context) goes into the prompt,
+    // for ↵, rather than being taken as keys. Not while typing in Edit, or over an overlay.
+    // (A terminal ends a pasted line with \r, which the family's rule takes as a \n.)
+    const text = focusRef.current === 'view' && !overlayRef.current && !confirmRef.current ? pastedLine(input) : null;
+    if (text) {
+      setPrompt(text.replace(/[\x00-\x1f\x7f]/g, ''));
+      setSugIndex(0);
+      historyPos.current = -1;
+      setFocus('prompt');
+      return null;
+    }
     let out = input;
     if (focusRef.current === 'view' && !overlayRef.current && !confirmRef.current && !ctx.claimsKey?.(input, {})) {
       const b = translateKey(customRef.current.keymap, viewRef.current, input);
@@ -808,6 +975,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       else {
         setEntries((list) => list.map((e) => ({ ...e, shown: false })));
         setWelcome(false);
+        setReaction(null);
       }
       return;
     }
@@ -931,14 +1099,20 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const act = activityRows(entries.filter((e) => e.shown !== false));
   const bottom = confirmReq ? confirmHeight(confirmReq) : 3 + suggestions.length;
   const mood = moodFor({ data, busy, lastEntry: entries.at(-1) });
+  // Hoot's mood, for the siblings, written whenever it changes.
+  const shared = familyMood(mood, { busy, lastEntry: entries.at(-1) });
+  useEffect(() => {
+    if (familyOn) writeMood('hail', shared);
+  }, [shared.mood, familyOn]);
+  const reactionRow = reaction ? [{ text: reactionLine(reaction), color: theme.accent }, { text: '  esc', color: theme.dim }] : null;
   // The welcome box only appears when the terminal has room for it next to a useful view.
   const showWelcome = welcome && H >= 28;
-  const mainH = Math.max(6, H - 2 - act.length - (busy ? 1 : 0) - bottom - 1 - (showWelcome ? WELCOME_HEIGHT : 0));
+  const mainH = Math.max(6, H - 2 - (reactionRow ? 1 : 0) - act.length - (busy ? 1 : 0) - bottom - 1 - (showWelcome ? WELCOME_HEIGHT : 0));
   const viewActive = focus === 'view' && !overlay && !confirmReq;
   layout.current = {
     mainTop: 2,
     mainH,
-    promptTop: 2 + mainH + (showWelcome ? WELCOME_HEIGHT : 0) + act.length + (busy ? 1 : 0),
+    promptTop: 2 + mainH + (showWelcome ? WELCOME_HEIGHT : 0) + (reactionRow ? 1 : 0) + act.length + (busy ? 1 : 0),
     sugCount: suggestions.length,
     tabs: tabLabels(entries),
   };
@@ -968,14 +1142,14 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       </Panel>
     );
   } else if (view === 'history') {
-    main = <HistoryView entries={history} data={data} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+    main = <HistoryView entries={history} data={data} focus={historyFocus} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else if (view === 'edit') {
     main = <EditView data={data} responses={responses} editor={editor} editing={focus === 'editor'} ctx={ctx} width={W} height={mainH} active={(viewActive || focus === 'editor') && !overlay && !confirmReq} />;
   } else if (view === 'response') {
     const request = ctx.selectedRequest();
     main = <ResponseView request={request} sent={request ? responses[request.label] : null} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   } else {
-    main = <RequestsView data={data} responses={responses} ctx={ctx} width={W} height={mainH} active={viewActive} />;
+    main = <RequestsView data={data} responses={responses} jump={jump} ctx={ctx} width={W} height={mainH} active={viewActive} />;
   }
 
   const left = flash
@@ -1003,6 +1177,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         {main}
       </Box>
       {showWelcome ? <Welcome mood={mood} data={data} width={W} update={update} /> : null}
+      {reactionRow ? <Row pointer={false} width={W} segments={reactionRow} /> : null}
       {act.map((segs, i) => (
         <Row key={i} pointer={false} width={W} segments={segs} />
       ))}

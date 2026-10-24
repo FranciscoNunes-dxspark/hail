@@ -1,4 +1,5 @@
-// Filling in {{variables}}: from the chosen environment, the file's own @variables, earlier responses
+// Filling in {{variables}}: from the globals response handlers set (client.global.set), the chosen
+// environment, the file's own @variables, earlier responses
 // ({{login.response.body.token}}) and the built-ins ({{$uuid}}, {{$timestamp}}…). Pure apart from the
 // built-ins that read the clock, the dice, the process's environment or a sign-in, which come in `env`.
 import { randomUUID } from 'node:crypto';
@@ -65,11 +66,12 @@ function fromResponse(expr, responses) {
 
 /**
  * `text` with its {{placeholders}} filled in: { text, missing } where `missing` lists the ones nothing
- * answered, left in place. `scope`: { environment, file, responses, env } (env: builtins' options).
- * The environment wins over the file's own variables, so a file can keep defaults the environments
- * override; either can use other variables in its values.
+ * answered, left in place. `scope`: { globals, environment, file, responses, env } (env: builtins'
+ * options). A global (set by a response handler) wins over the environment, as a value set while
+ * running is the newest; the environment wins over the file's own variables, so a file can keep
+ * defaults the environments override. Any of them can use other variables in its values.
  */
-export async function fill(text, { environment = {}, file = {}, responses = {}, env = {} } = {}, depth = 0) {
+export async function fill(text, { globals = {}, environment = {}, file = {}, responses = {}, env = {} } = {}, depth = 0) {
   const fns = builtins(env);
   const missing = [];
   const out = [];
@@ -83,11 +85,11 @@ export async function fill(text, { environment = {}, file = {}, responses = {}, 
       const [name, ...args] = expr.split(/\s+/);
       const dotted = /^\$env\.(.+)$/.exec(name);
       value = dotted ? env.processEnv?.[dotted[1]] ?? process.env[dotted[1]] : await fns[name]?.(args);
-    } else if (Object.hasOwn(environment, expr) || Object.hasOwn(file, expr)) {
-      const raw = String(Object.hasOwn(environment, expr) ? environment[expr] : file[expr]);
+    } else if (Object.hasOwn(globals, expr) || Object.hasOwn(environment, expr) || Object.hasOwn(file, expr)) {
+      const raw = String(Object.hasOwn(globals, expr) ? globals[expr] : Object.hasOwn(environment, expr) ? environment[expr] : file[expr]);
       // Variables made of other variables, to a depth that a loop can't go past.
       if (depth < 10) {
-        const inner = await fill(raw, { environment, file, responses, env }, depth + 1);
+        const inner = await fill(raw, { globals, environment, file, responses, env }, depth + 1);
         value = inner.text;
         missing.push(...inner.missing);
       } else value = raw;

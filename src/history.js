@@ -19,10 +19,11 @@ export const historyFile = (httpFile, dir = join(configDir(), 'history')) => joi
 const blank = (text, secrets) => secrets.reduce((t, s) => (s && s.length >= 4 ? t.split(s).join(HIDDEN) : t), String(text ?? ''));
 
 /**
- * What's kept of one response: { label, name, at, request, response } with the secrets used blanked
- * out everywhere, credential headers hidden, and a body over MAX_BODY cut (`truncated` set).
+ * What's kept of one response: { label, name, at, request, response, checks } with the secrets used
+ * blanked out everywhere (what the response handlers logged too), credential headers hidden, and a
+ * body over MAX_BODY cut (`truncated` set).
  */
-export function entryFor({ label, name, at, request, response }) {
+export function entryFor({ label, name, at, request, response, checks, saved }) {
   const secrets = request.secrets ?? [];
   const headers = (list) => list.map(([k, v]) => [k, SENSITIVE.test(k) ? HIDDEN : blank(v, secrets)]);
   const body = blank(response.body, secrets);
@@ -40,20 +41,37 @@ export function entryFor({ label, name, at, request, response }) {
       ms: response.ms,
       size: response.size,
       url: blank(response.url, secrets),
+      ...(response.insecure ? { insecure: true } : {}),
+      ...(response.proxy ? { proxy: response.proxy } : {}),
     },
+    checks: checks
+      ? {
+          tests: checks.tests.map((t) => ({ name: blank(t.name, secrets), passed: t.passed, ...(t.message ? { message: blank(t.message, secrets) } : {}) })),
+          log: checks.log.map((l) => blank(l, secrets)),
+          error: checks.error ? blank(checks.error, secrets) : null,
+        }
+      : undefined,
+    saved: saved ? (saved.error ? { error: blank(saved.error, secrets) } : { path: blank(saved.path, secrets), shown: blank(saved.shown, secrets) }) : undefined,
   };
 }
 
 /** The entries in `file`, oldest first; lines that don't read are skipped. */
 export function readHistory(file) {
-  let text;
+  let bytes;
   try {
-    text = readFileSync(file, 'utf8');
+    bytes = readFileSync(file);
   } catch {
     return [];
   }
+  // A line at a time from the bytes, rather than the whole file as one string first: a history full of
+  // big bodies runs to 150 MB, and this reads it about a third quicker. A newline byte is never part
+  // of a longer UTF-8 character, so cutting at it never splits one.
   const out = [];
-  for (const line of text.split('\n')) {
+  for (let at = 0; at < bytes.length; ) {
+    let end = bytes.indexOf(10, at);
+    if (end < 0) end = bytes.length;
+    const line = bytes.toString('utf8', at, end);
+    at = end + 1;
     if (!line.trim()) continue;
     try {
       out.push(JSON.parse(line));

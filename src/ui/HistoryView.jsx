@@ -8,11 +8,20 @@ import { useListNav, useMouse } from './hooks.js';
 import { Panel, Row } from './parts.jsx';
 import { methodColour, statusColour } from './response.js';
 
+// How its tests went, when it had any: "  ✓ 3" or "  ✗ 1/3".
+function testsSegment(checks) {
+  const tests = checks?.tests ?? [];
+  const failed = tests.filter((t) => !t.passed).length + (checks?.error ? 1 : 0);
+  if (!tests.length && !failed) return [];
+  return [{ text: failed ? `  ✗ ${failed}/${tests.length}` : `  ✓ ${tests.length}`, color: failed ? theme.del : theme.add }];
+}
+
 /** The responses kept for the open file, newest first. */
-export function HistoryView({ entries, data, ctx, width, height, active }) {
+export function HistoryView({ entries, data, focus = null, ctx, width, height, active }) {
   const list = [...entries].reverse();
   const innerH = height - 2;
-  const nav = useListNav(list.length, innerH, { resetKey: data?.path });
+  // `focus` ({ entry, n }): an entry to put the cursor on (/take logline found it).
+  const nav = useListNav(list.length, innerH, { resetKey: `${data?.path}#${focus?.n ?? 0}`, start: Math.max(0, focus ? list.indexOf(focus.entry) : 0) });
   const sel = list[nav.index];
   const labelW = Math.min(36, Math.max(10, ...list.map((e) => e.label.length)));
 
@@ -46,6 +55,7 @@ export function HistoryView({ entries, data, ctx, width, height, active }) {
             { text: fit(e.request.method, 7), color: methodColour(e.request.method) },
             { text: fit(e.label, labelW), strong: true },
             { text: `  ${e.response.ms} ms · ${formatSize(e.response.size)}`, color: theme.dim },
+            ...testsSegment(e.checks),
             { text: `  ${e.request.url}`, color: theme.dim },
           ]}
         />

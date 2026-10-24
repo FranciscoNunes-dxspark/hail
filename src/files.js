@@ -64,3 +64,5 @@ export function writeExample(path) {
   writeFileSync(path, EXAMPLE);
   return true;
 }
+
+export { pathArg } from './family.js';

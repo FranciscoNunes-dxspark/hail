@@ -3,7 +3,7 @@ import { Text, useInput, useStdin } from 'ink';
 import { copyCurl, send } from '../actions.js';
 import { accept, completeAt } from '../complete.js';
 import * as ed from '../editor.js';
-import { blockAt, highlight } from '../http-file.js';
+import { blockAt, highlightLines } from '../http-file.js';
 import { fit } from '../text.js';
 import { theme } from '../theme.js';
 import { atLeast } from '../mouse.js';
@@ -20,8 +20,11 @@ const COLORS = () => ({
   header: theme.info,
   value: undefined,
   file: theme.info,
-  handler: theme.dim,
+  handler: theme.add,
   placeholder: theme.warn,
+  directive: theme.bangMode,
+  boundary: theme.accent,
+  keyword: theme.bangMode,
 });
 const KIND_COLORS = () => ({ environment: theme.warn, file: theme.info, response: theme.add, builtin: theme.bangMode, header: theme.info, value: undefined });
 const MENU_ROWS = 8;
@@ -60,8 +63,6 @@ export function requestAtCursor(requests, editor) {
 export function EditView({ data, responses, editor, editing, ctx, width, height, active }) {
   const top = useRef(0);
   const left = useRef(0);
-  const text = ed.toText(editor);
-  const lines = useMemo(() => highlight(text), [text]);
   const innerH = height - 2;
   // The response beside the text when there's room for both.
   const paneW = width >= 100 ? Math.floor(width * 0.4) : 0;
@@ -344,6 +345,10 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
   popupRef.current = popup;
 
   const sel = ed.selection(editor);
+  // The rows on screen, coloured (from the start of the request the first of them is in).
+  const first = top.current;
+  const last = Math.min(editor.lines.length, first + innerH);
+  const lines = useMemo(() => highlightLines(editor.lines, first, last), [editor.lines, first, last]);
   const rows = [];
   for (let i = top.current; i < Math.min(editor.lines.length, top.current + innerH); i++) {
     // The gutter marks the request ctrl+r sends.
@@ -355,9 +360,9 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
     // The visible slice of the line, coloured, with the cursor drawn in reverse while typing.
     const segs = [];
     let x = 0;
-    for (const run of lines[i] ?? []) {
+    for (const run of lines[i - first] ?? []) {
       const color = run.kind === 'method' ? methodColour(run.text.toUpperCase()) : colors[run.kind];
-      const bold = run.kind === 'method' || run.kind === 'separator';
+      const bold = run.kind === 'method' || run.kind === 'separator' || run.kind === 'keyword' || run.kind === 'boundary';
       for (const ch of run.text) {
         if (x >= left.current && x < left.current + textW) {
           const cursor = editing && i === editor.row && x === editor.col;
@@ -411,7 +416,7 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
   const pane = !paneW
     ? null
     : sent
-      ? responseLines(sent, paneW - 4)
+      ? responseLines(sent, paneW - 4, { rows: innerH })
       : current
         ? [[{ text: 'ctrl+r sends ', color: theme.dim }, { text: current.label, bold: true }], [{ text: 'What comes back shows here.', color: theme.dim }]]
         : [[{ text: 'Put the cursor in a request (### starts one) to send it.', color: theme.dim }]];
@@ -422,7 +427,7 @@ export function EditView({ data, responses, editor, editing, ctx, width, height,
       </Panel>
       {pane ? (
         <Panel title={sent ? 'Response' : 'Request'} hint={sent ? 'v full view' : ''} width={paneW} height={height}>
-          <Lines lines={pane.map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
+          <Lines lines={pane.slice(0, innerH).map((segs) => [{ text: ' ' }, ...segs])} width={paneW - 2} height={innerH} />
         </Panel>
       ) : null}
     </>
