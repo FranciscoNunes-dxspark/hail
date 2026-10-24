@@ -10,8 +10,10 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { VERSION } from './version.js';
 
-export const REPO = 'FranciscoNunes-dxspark/hail';
-export const RELEASES_URL = `https://github.com/${REPO}/releases/latest`;
+// The app now lives in the fleet repository, released as hail-v<version> beside its siblings.
+export const REPO = 'FranciscoNunes-dxspark/fleet';
+export const TAG = 'hail-v';
+export const RELEASES_URL = `https://github.com/${REPO}/releases?q=${TAG}`;
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Runs the GitHub CLI, resolving with its stdout. */
@@ -38,7 +40,7 @@ export function compareVersions(a, b) {
 export async function fetchLatestRelease() {
   // Without a sign-in first: that works for anyone once the repository is public, with nothing installed.
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': `hail/${VERSION}` },
       signal: AbortSignal.timeout(5000),
     });
@@ -47,13 +49,17 @@ export async function fetchLatestRelease() {
     // Offline or blocked; gh may still get through.
   }
   // A private repository answers 404 to that, so ask through gh, with the sign-in it already has.
-  return release(JSON.parse(await gh(['api', `repos/${REPO}/releases/latest`], { signal: AbortSignal.timeout(15000) })));
+  return release(JSON.parse(await gh(['api', `repos/${REPO}/releases?per_page=100`], { signal: AbortSignal.timeout(15000) })));
 }
 
-function release(body) {
-  const version = String(body?.tag_name ?? '').replace(/^v/, '');
-  if (!version) throw new Error('No release found');
-  return { version, url: body.html_url || RELEASES_URL };
+/** The newest published release of this app among fleet's (its tag starts with TAG). */
+function release(list) {
+  const found = (Array.isArray(list) ? list : [])
+    .filter((r) => !r.draft && !r.prerelease && String(r.tag_name ?? '').startsWith(TAG))
+    .map((r) => ({ version: r.tag_name.slice(TAG.length), url: r.html_url || RELEASES_URL }))
+    .sort((a, b) => compareVersions(b.version, a.version))[0];
+  if (!found) throw new Error('No release found');
+  return found;
 }
 
 /**
@@ -101,7 +107,7 @@ export function parseChecksums(text) {
 async function downloadAssets(version, names, dir) {
   try {
     for (const name of names) {
-      const res = await fetch(`https://github.com/${REPO}/releases/download/v${version}/${name}`, {
+      const res = await fetch(`https://github.com/${REPO}/releases/download/${TAG}${version}/${name}`, {
         headers: { 'User-Agent': `hail/${VERSION}` },
         signal: AbortSignal.timeout(DOWNLOAD_MS),
       });
@@ -112,7 +118,7 @@ async function downloadAssets(version, names, dir) {
   } catch {
     // A private repository answers 404; gh has a sign-in that can read it.
   }
-  await gh(['release', 'download', `v${version}`, '--repo', REPO, '--dir', dir, '--clobber', ...names.flatMap((n) => ['--pattern', n])], {
+  await gh(['release', 'download', `${TAG}${version}`, '--repo', REPO, '--dir', dir, '--clobber', ...names.flatMap((n) => ['--pattern', n])], {
     signal: AbortSignal.timeout(DOWNLOAD_MS),
   });
 }
