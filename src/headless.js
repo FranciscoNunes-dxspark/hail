@@ -11,6 +11,7 @@ import { findHttpFiles, loadHttpFile } from './files.js';
 import { checkContract, loadContract } from './contract.js';
 import { exchange, reportLines, runFailed } from './runner.js';
 import { prepare } from './send.js';
+import { createTokens, fillAuthConfig, readAuthConfig, refreshName } from './oauth.js';
 
 export const TEST_USAGE = `hail test [file.http] [--env <name>] [--contract <openapi file or URL>] [--contract-strict]
 
@@ -108,13 +109,23 @@ export async function runTests(args, { print = console.log, printError = console
       return null;
     }
   };
+  // {{$auth.token("id")}}: Client Credentials and Password sign in here; the others need a refresh token
+  // kept by a sign-in in Hail itself (in the same store), as there's no one to sign in.
+  const tokens = createTokens({ credentials, onNote: printError });
+  const auth = async (kind, id) => {
+    const raw = data.environments.auth(env)[id];
+    if (!raw) throw new Error(`There's no auth called ${id} in ${env ? `the ${env} environment` : 'the environments'}`);
+    const filled = await fillAuthConfig(raw, { globals, environment: data.environments.vars(env), file: data.variables, responses, env: { azToken, secret } });
+    if (filled.missing.length) throw new Error(`The auth ${id} uses ${filled.missing.map((m) => `{{${m}}}`).join(', ')}, which nothing gives a value`);
+    return tokens.get({ key: id, store: refreshName(data.path, env, id), cfg: readAuthConfig(id, filled.raw), kind });
+  };
   const responses = {};
   const jar = createJar();
   let globals = {};
   const results = [];
   let stopped = false;
   for (const request of data.requests) {
-    const scope = { globals, environment: data.environments.vars(env), file: data.variables, responses, env: { azToken, secret } };
+    const scope = { globals, environment: data.environments.vars(env), file: data.variables, responses, env: { azToken, secret, auth } };
     let req;
     try {
       req = await prepare(request, scope, { dir: data.dir });

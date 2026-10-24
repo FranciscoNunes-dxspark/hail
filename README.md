@@ -144,12 +144,68 @@ another way (`-k`) are named when it's added.
 | The file | `@name = value` lines |
 | Earlier responses | `{{login.response.body.token}}` is the `token` field of what the request named `login` (`# @name login`) got back; a path like `data.items[0].id` (or `$.data…`) reaches further in, `.headers.X-Request-Id` reads a header |
 | Secrets | `{{$secret api-key}}`: kept in the system's own credential store (Windows Credential Manager, the macOS Keychain, the Secret Service keyring on Linux), never in a file. The first request that needs one asks for it in a hidden field and saves it; `/secret <name>` saves or replaces one, `/secret` lists them to replace or forget |
+| Sign-ins | `{{$auth.token("api")}}`: an OAuth 2 access token for the environment's auth called `api` (see [OAuth 2](#oauth-2)); `{{$auth.idToken("api")}}` its ID token |
 | Built-ins | `{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, `{{$randomInt 1 100}}`, `{{$processEnv NAME}}` or `{{$env.NAME}}` (this computer's environment), `{{$azToken [resource]}}` (a token from the Azure CLI's sign-in, Azure Resource Manager's unless a resource is named) |
 
 A secret can sit in an environment file too (`"apiKey": "{{$secret prod-api-key}}"`), so the file can
 be committed. The environment wins over the file, so a file can hold defaults that environments override. A
 variable can be made of others. A request with a variable nothing gives a value isn't sent: Hail
 says which.
+
+### OAuth 2
+
+As in JetBrains, an environment can say how to sign in, under `"Security"`, and a request uses the
+token with `{{$auth.token("<id>")}}`:
+
+```json
+{
+  "dev": {
+    "host": "http://localhost:3000",
+    "Security": {
+      "Auth": {
+        "api": {
+          "Type": "OAuth2",
+          "Grant Type": "Authorization Code",
+          "Auth URL": "https://login.example.com/authorize",
+          "Token URL": "https://login.example.com/token",
+          "Client ID": "my-app",
+          "Client Secret": "{{$secret my-app-secret}}",
+          "Scope": "openid offline_access api",
+          "Redirect URL": "http://127.0.0.1:8765/callback"
+        }
+      }
+    }
+  }
+}
+```
+
+```http
+GET {{host}}/me
+Authorization: Bearer {{$auth.token("api")}}
+```
+
+| Setting | |
+| --- | --- |
+| `"Type"` | `"OAuth2"` |
+| `"Grant Type"` | `"Client Credentials"`, `"Password"`, `"Authorization Code"` or `"Device Authorization"` (Implicit isn't supported) |
+| `"Token URL"`, `"Client ID"` | Every grant needs them |
+| `"Client Secret"` | When the client has one; best as `{{$secret name}}`, asked for and kept in the system's store. `"Client Credentials": "basic"` sends the client's id and secret as an `Authorization: Basic` header, `"none"` sends no secret; they go in the form unless said |
+| `"Scope"` | What to ask for |
+| `"Auth URL"`, `"Redirect URL"`, `"PKCE"` | Authorization Code: the sign-in page opens in the browser, and Hail catches the code on this machine at the Redirect URL (which has to be `http://127.0.0.1:<port>/…` or `http://localhost:<port>/…`, as the app is registered with; without one, any free port and `/callback`). PKCE (S256) is used unless `"PKCE": false`; `{ "Code Challenge Method": "Plain", "Code Verifier": "…" }` sets it. If the browser doesn't open, the page's address is in the Log. Hail waits five minutes; `esc` stops waiting |
+| `"Device Auth URL"` | Device Authorization: the code to enter and the page to enter it at show where questions do (↵ opens the page or copies the code), and Hail polls until you've signed in there; `esc` cancels |
+| `"Username"`, `"Password"` | Password grant (best as `{{$secret …}}`) |
+| `"Audience"`, `"Resource"`, `"Custom Request Parameters"` | Sent with the sign-in and token requests; a custom parameter can be `{ "Value": "…", "Use": "In Auth Request" }` (or `"In Token Request"`) |
+| `"Use ID Token"` | `true`: `{{$auth.token}}` gives the ID token |
+
+Every value can use variables. The config can be split between the env files, so the private one
+holds the secret; `"$shared"` works too. A token is kept in memory, for the file and environment,
+until it runs out, then refreshed; a refresh token, when the server gives one, is kept in the system's
+credential store (never in a file), so the next time Hail opens it refreshes rather than asks you to
+sign in again. Tokens are secrets to the history and the activity lines: they're blanked wherever they
+turn up. `/auth` lists the environment's sign-ins and how each stands (never the token): `↵` signs in
+again, `x` forgets it; `/auth <id>` signs in with one now; `/auth clear` forgets them all.
+`hail test` signs in with Client Credentials and Password itself, and uses a refresh token Hail kept
+for the others (a browser or device sign-in needs Hail once).
 
 ### Checking responses
 
@@ -415,6 +471,7 @@ and Trawl.
 | `/open <file.http>` | Open another file |
 | `/contract [file\|url\|off]` | Check every response against an OpenAPI or Swagger document, remembered for the file (`off` forgets it) |
 | `/find <text>` | Find text in the file, in Edit (`n` and `N` go on to the next and the one before) |
+| `/auth [id\|clear]` | The environment's OAuth sign-ins and how each stands (`↵` signs in again, `x` forgets it); an id signs in with it; `clear` forgets them all |
 | `/secret [name]` | Save a secret in the system's store for `{{$secret name}}` (the saved ones, to replace or forget, if none is named) |
 | `/history [clear]` | The responses kept for this file (`clear` forgets them) |
 | `/cookies [clear]` | The cookies kept for this file and environment (`clear` forgets them) |

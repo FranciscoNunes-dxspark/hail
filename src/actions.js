@@ -14,6 +14,7 @@ import { run } from './run.js';
 import { checkSummary } from './checks.js';
 import { exchange, reportLines, runFailed, summaryLine } from './runner.js';
 import { loadReport, loadStats, loadSummary, parseLoadArgs, runLoad } from './load.js';
+import { GRANT_NAMES, authorizationCode, deviceAuthorization, fillAuthConfig, grantName, readAuthConfig, refreshName } from './oauth.js';
 import { formatSize, prepare, prettyBody, send as sendRequest, toCurl } from './send.js';
 import { parseTimeout } from './transport.js';
 import { nextTheme, settingRows, settingSegments } from './settings.js';
@@ -57,6 +58,12 @@ async function fillRequest(ctx, request) {
   return req;
 }
 
+/** Says why filling a request in failed, unless it's been said (a sign-in's own line did); null. */
+function failed(ctx, e) {
+  if (!e.noted) ctx.note(e.message, 'error');
+  return null;
+}
+
 /** Why a request with variables nothing answers isn't sent, in words. */
 function missingText(ctx, missing) {
   const env = ctx.environment();
@@ -95,7 +102,7 @@ export async function send(ctx, which) {
   if (typeof which === 'string' && which.trim().toLowerCase() === 'all' && !ctx.data.requests.some((r) => r.name?.toLowerCase() === 'all')) return sendAll(ctx);
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note(which ? `There's no request called ${which}.` : 'The file has no requests yet.', 'error');
-  const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
+  const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (!req) return;
   // The secrets in it stay out of the activity lines.
   const shown = req.secrets.reduce((t, v) => t.split(v).join('••••••'), req.url);
@@ -183,7 +190,7 @@ export async function load(ctx, rest) {
   if (args.problem) return ctx.note(args.problem, 'error');
   const request = requestNamed(ctx, args.name);
   if (!request) return ctx.note(args.name ? `There's no request called ${args.name}.` : 'The file has no requests yet.', 'error');
-  const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
+  const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (!req) return;
   const { count, concurrency } = args;
   const options = req.options ?? {};
@@ -221,7 +228,7 @@ export async function load(ctx, rest) {
 export async function copyCurl(ctx, which) {
   const request = typeof which === 'object' && which ? which : requestNamed(ctx, which);
   if (!request) return ctx.note('Pick a request first.', 'error');
-  const req = await prepared(ctx, request).catch((e) => (ctx.note(e.message, 'error'), null));
+  const req = await prepared(ctx, request).catch((e) => failed(ctx, e));
   if (req) ctx.copy(toCurl(req, { dir: ctx.data.dir }), 'it as curl');
 }
 
@@ -229,7 +236,7 @@ export async function copyCurl(ctx, which) {
  * Asks for the secret `name` in a masked field and saves it in the system's store. Resolves with
  * whether it was saved (esc says no).
  */
-async function askForSecret(ctx, name, { replace = false } = {}) {
+export async function askForSecret(ctx, name, { replace = false } = {}) {
   const store = ctx.credentials;
   const answer = await ctx.askSecret({
     title: `${replace ? 'A new value for' : 'The value of'} the secret ${name}`,
@@ -671,3 +678,143 @@ export function family(ctx) {
   });
 }
 
+
+// ---------------------------------------------------------------------------------------------------
+// OAuth 2 (oauth.js): {{$auth.token("id")}} and /auth.
+
+/** The OAuth configs of the environment picked, by id ("Security": { "Auth": { … } }). */
+const authConfigs = (ctx) => ctx.data?.environments.auth?.(ctx.environment()) ?? {};
+
+/** Where `id`'s token is kept: in memory (`key`) and its refresh token in the store (`store`). */
+const authKeys = (ctx, id) => ({ key: `${ctx.data.path}\n${ctx.environment() ?? ''}\n${id}`, store: refreshName(ctx.data.path, ctx.environment(), id) });
+
+/**
+ * The auth `id` of the environment picked, its variables filled in and read (oauth.js's readAuthConfig).
+ * A {{$secret}} in it (a Client Secret) that isn't saved yet is asked for, as a request's would be.
+ */
+async function authConfig(ctx, id) {
+  const raw = authConfigs(ctx)[id];
+  const env = ctx.environment();
+  if (!raw) throw new Error(`There's no auth called ${id} in ${env ? `the ${env} environment` : 'the environments'}: "Security": { "Auth": { "${id}": { … } } } in http-client.env.json`);
+  let filled = await fillAuthConfig(raw, ctx.scope());
+  const unsaved = filled.missing.map((m) => /^\$secret\s+(\S+)$/.exec(m)?.[1]).filter(Boolean);
+  if (unsaved.length) {
+    for (const name of unsaved) if (!(await askForSecret(ctx, name))) throw new Error(`The secret ${name} the auth ${id} needs wasn't given.`);
+    filled = await fillAuthConfig(raw, ctx.scope());
+  }
+  if (filled.missing.length) throw new Error(`The auth ${id} uses ${filled.missing.map((m) => `{{${m}}}`).join(', ')}, which nothing gives a value`);
+  return readAuthConfig(id, filled.raw);
+}
+
+/** {{$auth.token("id")}} and {{$auth.idToken("id")}}: the token, signing in (or refreshing) when there's none. */
+export async function authToken(ctx, kind, id) {
+  if (!ctx.data) throw new Error(NO_FILE);
+  const cfg = await authConfig(ctx, id);
+  return ctx.tokens.get({ ...authKeys(ctx, id), cfg, kind, interactive: (c) => interactiveSignIn(ctx, c) });
+}
+
+/** A sign-in that needs a person (Authorization Code, Device Authorization), with the spinner: esc cancels. */
+function interactiveSignIn(ctx, cfg) {
+  const how = cfg.grant === 'code' ? codeSignIn : deviceSignIn;
+  return ctx.withSignal(`Sign in: ${cfg.id} (${GRANT_NAMES[cfg.grant]})`, (signal) => how(ctx, cfg, signal), { label: 'Signing in', done: `Signed in with ${cfg.id}` });
+}
+
+/** Authorization Code: the browser opens on the sign-in page, and its address is said in case it didn't. */
+function codeSignIn(ctx, cfg, signal) {
+  return authorizationCode(cfg, { signal, openUrl: ctx.openUrl, onUrl: (url) => ctx.note(`Signing in with ${cfg.id} in the browser. If it didn't open, go to:\n${url}`) });
+}
+
+/**
+ * Device Authorization: the code and where to enter it in the confirm area (↵ opens the page, or copies
+ * the code) while Hail polls; it goes when the sign-in is done, and esc (or Cancel) stops it.
+ */
+async function deviceSignIn(ctx, cfg, signal) {
+  const stop = new AbortController();
+  const onAbort = () => stop.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let shown = null;
+  let over = false;
+  const show = async (c) => {
+    while (!over) {
+      shown = ctx.notice({
+        title: `Enter ${c.userCode} at ${c.verificationUri} to sign in with ${cfg.id}`,
+        detail: 'Hail carries on by itself once you have · esc cancels',
+        options: [
+          { label: 'Open the page in the browser', value: 'open' },
+          { label: 'Copy the code', value: 'copy' },
+          { label: 'Cancel', value: false },
+        ],
+      });
+      const v = await shown.answer;
+      if (v === 'closed' || over) return;
+      if (v === 'open') await Promise.resolve(ctx.openUrl?.(c.verificationUriComplete ?? c.verificationUri)).catch(() => {});
+      else if (v === 'copy') ctx.copy(c.userCode, 'the code');
+      else return stop.abort();
+    }
+  };
+  try {
+    return await deviceAuthorization(cfg, { signal: stop.signal, onCode: (c) => void show(c) });
+  } finally {
+    over = true;
+    shown?.close();
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** How `id` stands, in words (never its token): signed in and for how long, a refresh token kept, or not. */
+async function authStatus(ctx, id) {
+  const { key, store } = authKeys(ctx, id);
+  const s = await ctx.tokens.status(key, store);
+  if (s.signedIn) return s.expiresAt ? `signed in, the token runs out in ${Math.max(1, Math.round((s.expiresAt - Date.now()) / 60_000))} min` : 'signed in';
+  return s.refresh ? 'not signed in; a refresh token is kept, so the next use refreshes it' : 'not signed in';
+}
+
+/** Signs in with `id` now (`again`: forgetting what's kept first), and says how it stands. */
+async function signInNow(ctx, id, { again = false } = {}) {
+  if (again) await ctx.tokens.forget(...Object.values(authKeys(ctx, id)));
+  try {
+    await authToken(ctx, 'token', id);
+  } catch (e) {
+    return failed(ctx, e);
+  }
+  ctx.note(`${id}: ${await authStatus(ctx, id)}`, 'ok');
+}
+
+/**
+ * /auth [id|clear]: the OAuth sign-ins of the environment picked and how each stands (↵ signs in again,
+ * x forgets it); `/auth <id>` signs in with one (if it isn't already) and says how it stands; `clear`
+ * forgets every token, and the refresh tokens kept, for this file and environment.
+ */
+export async function auth(ctx, rest) {
+  if (!ctx.data) return ctx.note(NO_FILE, 'error');
+  const arg = rest.trim();
+  const ids = Object.keys(authConfigs(ctx));
+  const env = ctx.environment();
+  const where = `${ctx.data.name}${env ? ` in ${env}` : ''}`;
+  if (!ids.length) return ctx.note(`No OAuth sign-ins for ${where}: an environment's "Security": { "Auth": { "<id>": { "Type": "OAuth2", "Grant Type": … } } } in http-client.env.json makes one, and {{$auth.token("<id>")}} uses it.`);
+  if (arg === 'clear') {
+    for (const id of ids) await ctx.tokens.forget(...Object.values(authKeys(ctx, id)));
+    return ctx.note(`Forgot the tokens for ${where} (${ids.join(', ')}), and their refresh tokens in ${ctx.credentials.name}`);
+  }
+  if (arg) {
+    const id = ids.find((i) => i.toLowerCase() === arg.toLowerCase());
+    if (!id) return ctx.note(`There's no auth called ${arg} for ${where}. There are: ${ids.join(', ')}`, 'error');
+    return signInNow(ctx, id);
+  }
+  ctx.showPicker({
+    title: `Sign-ins: ${where}`,
+    hint: '↵ sign in again · x forget it',
+    load: async () => Promise.all(ids.map(async (id) => ({ id, segments: [{ text: id, strong: true }, { text: `  ${grantName(authConfigs(ctx)[id])}`, color: theme.dim }, { text: `  ${await authStatus(ctx, id)}`, color: theme.dim }] }))),
+    onPick: (it) => {
+      ctx.closeOverlay();
+      signInNow(ctx, it.id, { again: true });
+    },
+    keys: {
+      x: async (it) => {
+        await ctx.tokens.forget(...Object.values(authKeys(ctx, it.id)));
+        ctx.closeOverlay();
+        ctx.note(`Forgot the token for ${it.id}, and its refresh token`);
+      },
+    },
+  });
+}

@@ -13,6 +13,8 @@ const BUILTINS = [
   ['$env.', 'NAME', false, true],
   ['$azToken', "the Azure CLI's sign-in"],
   ['$secret ', 'name', true],
+  ['$auth.token("', 'id"): an OAuth sign-in', false, true],
+  ['$auth.idToken("', 'id"): its ID token', false, true],
 ];
 
 const HEADERS = [

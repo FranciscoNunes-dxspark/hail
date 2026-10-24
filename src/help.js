@@ -96,6 +96,7 @@ export const HELP = [
       ['{{$uuid}} {{$timestamp}}', 'Built-ins; also $isoTimestamp, $randomInt min max, $processEnv NAME, $env.NAME'],
       ['{{$azToken resource}}', "A token from the Azure CLI's sign-in (az login)"],
       ['{{$secret name}}', "A secret kept in the system's credential store, asked for the first time it's used (/secret saves or replaces one)"],
+      ['{{$auth.token("id")}}', 'An OAuth 2 token from the environment\'s "Security": { "Auth": { "id": { "Type": "OAuth2", "Grant Type": … } } }\nClient Credentials, Password, Authorization Code (the browser, PKCE) or Device Authorization (a code to enter)\nkept until it runs out, then refreshed (refresh tokens in the credential store) · $auth.idToken gives the ID token\n/auth shows each sign-in (↵ again, x forget) · /auth <id> signs in · /auth clear forgets them'],
     ],
   },
   {

@@ -12,6 +12,7 @@ export const COMMANDS = [
   { name: 'find', args: '<text>', desc: 'Find text in the file, in the Edit view (n and N go on to the next and the one before)', run: (ctx, s) => ctx.findInEditor(s) },
   { name: 'open', args: '<file.http>', desc: 'Open another .http file', complete: 'files', run: (ctx, s) => a.open(ctx, s) },
   { name: 'new', args: '[file.http]', desc: 'Write an example .http file to start from (requests.http) and open it', run: (ctx, s) => a.newFile(ctx, s) },
+  { name: 'auth', args: '[id|clear]', desc: 'OAuth sign-ins of the environment and how each stands (↵ signs in again, x forgets); an id signs in with it; clear forgets them', complete: 'auths', run: (ctx, s) => a.auth(ctx, s) },
   { name: 'secret', args: '[name]', desc: 'Save a secret in the system\'s store for {{$secret name}} (the saved ones, to replace or forget, if none is named)', run: (ctx, s) => a.secret(ctx, s) },
   { name: 'cookies', args: '[clear]', desc: 'The cookies kept for this file and environment (clear forgets them)', run: (ctx, s) => a.cookies(ctx, s) },
   { name: 'history', args: '[clear]', desc: 'The responses kept for this file (clear forgets them)', run: (ctx, s) => (s.trim() === 'clear' ? a.clearHistory(ctx) : ctx.setView('history')) },
@@ -37,10 +38,11 @@ export function findCommand(name, user = []) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function completions(kind, data, files) {
+function completions(kind, data, files, environment) {
   if (kind === 'requests') return [...(data?.requests ?? []).map((r) => r.name ?? r.label), ...(data?.requests?.length ? ['all'] : [])];
   if (kind === 'environments') return data?.environments.names ?? [];
   if (kind === 'files') return files;
+  if (kind === 'auths') return data ? [...Object.keys(data.environments.auth?.(environment) ?? {}), 'clear'] : [];
   return [];
 }
 
@@ -56,7 +58,7 @@ function ranked(names, query) {
  * list a command completes its argument from. `insert` replaces the prompt text; `run` means picking
  * it can run straight away.
  */
-export function suggestionsFor(value, { data, files = [], user = [] } = {}) {
+export function suggestionsFor(value, { data, files = [], user = [], environment = null } = {}) {
   if (!value.startsWith('/')) return [];
   const space = value.indexOf(' ');
   const all = [...COMMANDS, ...user];
@@ -71,7 +73,7 @@ export function suggestionsFor(value, { data, files = [], user = [] } = {}) {
   const cmd = findCommand(value.slice(1, space), user);
   const rest = value.slice(space + 1);
   if (!cmd?.complete) return [];
-  const names = ranked(completions(cmd.complete, data, files), rest);
+  const names = ranked(completions(cmd.complete, data, files, environment), rest);
   if (names.length === 1 && names[0] === rest) return [];
   return names.slice(0, 7).map((n) => ({ label: n, insert: `/${cmd.name} ${n}`, run: true }));
 }

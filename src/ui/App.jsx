@@ -15,6 +15,7 @@ import { commandsSection, sectionFor } from '../help-layout.js';
 import { findHttpFiles, loadHttpFile } from '../files.js';
 import { defaultEnvironment } from '../environments.js';
 import { createJar } from '../cookies.js';
+import { createTokens } from '../oauth.js';
 import { checkContract, loadContract } from '../contract.js';
 import { contextIn, pastedLine, readMoods, writeMood } from '../family.js';
 import { replaceBody } from '../takes.js';
@@ -134,8 +135,9 @@ const DOUBLE_CLICK_MS = 400;
 // come only in the downloaded builds, so tests and checkouts never go online or replace anything.
 // `notify(title, body)` says a long run has finished (cli.jsx rings the terminal's bell and raises a
 // desktop notification); tests pass a recorder or nothing. `familyEvery` is how often (ms) the sibling
-// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do).
-export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, familyEvery = 30_000 }) {
+// apps' moods are read (family.js; FAMILY_HOME moves them, which tests do). `openUrl` opens a page in
+// the browser (an OAuth sign-in; cli.jsx's browser.js), which tests stub.
+export function App({ config: initialConfig, initialFile, load = loadHttpFile, azToken = azCli, credentials = osCredentials, askClaude, checkUpdate, installUpdate, setTitle, mouse, copy, notify, openUrl, familyEvery = 30_000 }) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [config, setConfigState] = useState(initialConfig);
@@ -224,6 +226,13 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
   const promptRef = useRef(prompt);
   const confirmRef = useRef(null);
   const nextId = useRef(1);
+  // OAuth tokens (oauth.js), in memory per file, environment and auth id; refresh tokens go to `credentials`.
+  const tokensRef = useRef(null);
+  tokensRef.current ??= createTokens({
+    credentials,
+    onSignIn: ({ id, how }) => how === 'signed in' && note(`Signed in with ${id}`, 'ok'),
+    onNote: (text) => note(text, 'error'),
+  });
   const historyPos = useRef(-1);
   // What /find (ctrl+f in the Edit view) looked for last, for n and N.
   const lastFind = useRef('');
@@ -434,7 +443,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       return { ok: false, error: new Error('busy') };
     }
     const controller = new AbortController();
-    const b = { label, started: Date.now(), abort: () => controller.abort() };
+    const b = { label, started: Date.now(), abort: () => controller.abort(), signal: controller.signal };
     busyRef.current = b;
     setBusy(b);
     const id = addEntry({ title, status: 'running' });
@@ -493,6 +502,35 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
       confirmRef.current = full;
       setConfirmReq(full);
     });
+  // A question that something else can also put away: { answer, close }. `answer` resolves with the
+  // option picked, or 'closed' when `close()` took it away first (a device sign-in that finished).
+  const notice = (req) => {
+    let close;
+    const answer = new Promise((done) => {
+      const full = { options: [{ label: 'Cancel', value: false }], ...req, id: nextId.current++, done };
+      confirmRef.current = full;
+      setConfirmReq(full);
+      close = () => {
+        if (confirmRef.current !== full) return;
+        confirmRef.current = null;
+        setConfirmReq(null);
+        done('closed');
+      };
+    });
+    return { answer, close };
+  };
+  // `fn(signal)` under the task running now (its esc cancels it), or, with none, as a task of its own
+  // titled `title`: a sign-in that a send needs before it can go. A failure is said once, by the task.
+  const withSignal = async (title, fn, { label, done = 'Done' } = {}) => {
+    if (busyRef.current) return fn(busyRef.current.signal);
+    let out;
+    const r = await task(title, async (signal) => {
+      out = await fn(signal);
+      return { stdout: done };
+    }, { label });
+    if (!r.ok) throw Object.assign(r.error, { noted: true });
+    return out;
+  };
   const onConfirm = (value) => {
     const req = confirmRef.current;
     confirmRef.current = null;
@@ -536,7 +574,7 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
         environment: d && env ? d.environments.vars(env) : (d?.environments.vars(null) ?? {}),
         file: d?.variables ?? {},
         responses: named,
-        env: { azToken, secret: (name) => credentials.get(name) },
+        env: { azToken, secret: (name) => credentials.get(name), auth: (kind, id) => a.authToken(ctx, kind, id) },
       };
     },
     // The open file's contract: { source, spec, operations, error } (spec null without one).
@@ -631,6 +669,10 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
     // A view that takes keys the app would otherwise use (the Response view's search) says so here.
     claimsKey: null,
     askSecret: (req) => confirm({ ...req, secret: true, options: [] }),
+    notice,
+    withSignal,
+    tokens: tokensRef.current,
+    openUrl,
     credentials,
     askClaude,
     send: (request) => a.send(ctx, request),
@@ -922,13 +964,13 @@ export function App({ config: initialConfig, initialFile, load = loadHttpFile, a
 
   // .http files to /open, looked for while that's being typed.
   const files = focus === 'prompt' && prompt.value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [];
-  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { user: customRef.current.commands, data, files }) : [];
+  const suggestions = focus === 'prompt' && !confirmReq ? suggestionsFor(prompt.value, { user: customRef.current.commands, data, files, environment: environment() }) : [];
   const sel = Math.min(sugIndex, Math.max(0, suggestions.length - 1));
 
   // Line editing in the prompt.
   const promptKeys = (input, key) => {
     const { value, cursor } = promptRef.current;
-    const items = suggestionsFor(value, { user: customRef.current.commands, data: dataRef.current, files: value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [] });
+    const items = suggestionsFor(value, { user: customRef.current.commands, data: dataRef.current, files: value.startsWith('/open ') ? findHttpFiles(process.cwd()) : [], environment: environment() });
     const pick = items[Math.min(sugIndex, items.length - 1)];
     const edit = (v, c) => {
       setPrompt(v, c);
